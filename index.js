@@ -38,6 +38,7 @@ const Product = require('./models/Product');
 const Order = require('./models/Order');
 const Visit = require('./models/Visit');
 const Coupon = require('./models/Coupon');
+const Tip = require('./models/Tip');
 
 // --- COUPON ROUTES ---
 
@@ -95,6 +96,36 @@ app.post('/api/validate-coupon', async (req, res) => {
       discountType: coupon.discountType, 
       discountValue: coupon.discountValue 
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- TIP OF THE DAY ROUTES ---
+
+// 1. Fetch current tip (Public)
+app.get('/api/tip', async (req, res) => {
+  try {
+    const tip = await Tip.findOne().sort({ updatedAt: -1 });
+    if (!tip) {
+      return res.status(200).json({ text: 'Start your meal with protein to stay fuller for longer and maintain steady energy throughout the day.' });
+    }
+    res.status(200).json(tip);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Update tip (Admin)
+app.post('/api/tip', async (req, res) => {
+  try {
+    const { text } = req.body;
+    const tip = await Tip.findOneAndUpdate(
+      {}, 
+      { text, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    res.status(200).json({ success: true, tip });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

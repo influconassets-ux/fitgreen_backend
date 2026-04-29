@@ -14,8 +14,13 @@ const orderSchema = new mongoose.Schema({
   }],
   total: { type: String },
   address: { type: String },
+  city: { type: String },
+  pinCode: { type: String },
+  phone: { type: String },
   status: { type: String, default: 'pending' },
   date: { type: Date, default: Date.now }
 }, { timestamps: true });
+
+orderSchema.index({ customerUid: 1 });
 
 module.exports = mongoose.model('Order', orderSchema);

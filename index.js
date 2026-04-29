@@ -8,7 +8,36 @@ const dns = require('node:dns');
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const app = express();
+const http = require('http');
+const server = http.createServer(app);
+const { Server } = require('socket.io');
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST", "PATCH", "DELETE"]
+  }
+});
+
 app.use(cors());
+
+// Socket.io Connection
+io.on('connection', (socket) => {
+  console.log('🔌 A user connected via Socket.io');
+  
+  socket.on('join', (uid) => {
+    socket.join(uid);
+    console.log(`👤 User joined room: ${uid}`);
+  });
+
+  socket.on('admin-join', () => {
+    socket.join('admin-room');
+    console.log(`🔑 Admin joined admin-room`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('🔌 User disconnected');
+  });
+});
 
 // 2. IMAGE FIX: Increase JSON limit to 10MB to allow profile photos
 app.use(express.json({ limit: '10mb' }));
@@ -229,6 +258,10 @@ app.post('/place-order', async (req, res) => {
       customerUid: uid,
       customerName: user?.name || 'Customer',
       customerEmail: user?.email || '',
+      address: orderData.address || user?.address || 'N/A',
+      city: user?.city || '',
+      pinCode: user?.pinCode || '',
+      phone: user?.phone || '',
     });
     await newOrder.save();
 
@@ -239,6 +272,10 @@ app.post('/place-order', async (req, res) => {
     );
 
     res.status(200).json({ success: true, order: newOrder });
+
+    // EMIT TO ADMINS
+    io.to('admin-room').emit('newOrder', newOrder);
+    console.log(`📢 Emitted real-time new order notification to admin room: ${newOrder.id}`);
   } catch (error) {
     console.error('Failed to save order:', error);
     res.status(500).json({ success: false, error: 'Failed to save order history' });
@@ -308,11 +345,67 @@ app.get('/api/orders', async (req, res) => {
   }
 });
 
+// 5c. Update Order Status
+app.patch('/api/orders/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const { id } = req.params;
+    console.log(`Attempting status update for ${id} to: ${status}`);
+
+    // Try to find by custom 'id' field OR MongoDB '_id'
+    let query = { $or: [{ id: id }] };
+    
+    // If 'id' looks like a MongoDB ObjectId, add it to the $or query
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      query.$or.push({ _id: id });
+    }
+
+    const order = await Order.findOneAndUpdate(
+      query,
+      { $set: { status } },
+      { new: true }
+    );
+
+    if (!order) {
+      console.log(`Order ${id} not found in database for status update.`);
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    // CRITICAL: Also update the status in the User's embedded orders array
+    if (order.customerUid) {
+      await User.findOneAndUpdate(
+        { uid: order.customerUid, "orders.id": order.id },
+        { $set: { "orders.$.status": status } }
+      );
+      console.log(`Updated status in User ${order.customerUid} embedded orders.`);
+    }
+
+    console.log(`Successfully updated order ${order.id} status to: ${order.status}`);
+    
+    // EMIT REAL-TIME UPDATE VIA SOCKET.IO
+    if (order.customerUid) {
+      io.to(order.customerUid).emit('statusUpdate', {
+        orderId: order.id,
+        status: status
+      });
+      console.log(`📢 Emitted real-time status update to user room: ${order.customerUid}`);
+    }
+
+    res.status(200).json({ success: true, order });
+  } catch (err) {
+    console.error(`Status update failed for ${req.params.id}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 5b. Fetch Orders for a Specific User
 app.get('/api/orders/user/:uid', async (req, res) => {
   try {
-    const orders = await Order.find({ customerUid: req.params.uid }).sort({ date: -1 });
-    res.status(200).json(orders);
+    const user = await User.findOne({ uid: req.params.uid });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    res.status(200).json({ success: true, orders: user.orders || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -348,6 +441,6 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

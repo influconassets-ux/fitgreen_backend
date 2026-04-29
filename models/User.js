@@ -27,4 +27,6 @@ const userSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now }
 });
 
+userSchema.index({ "orders.id": 1 });
+
 module.exports = mongoose.model('User', userSchema);

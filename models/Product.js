@@ -12,6 +12,7 @@ const productSchema = new mongoose.Schema({
   protein: { type: String },
   carbs: { type: String },
   fat: { type: String },
+  sugar: { type: String },
   isMostLoved: { type: Boolean, default: false },
   isSeasonal: { type: Boolean, default: false },
   outOfStock: { type: Boolean, default: false },

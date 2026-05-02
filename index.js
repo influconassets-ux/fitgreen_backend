@@ -281,9 +281,9 @@ app.post('/place-order', async (req, res) => {
 
     res.status(200).json({ success: true, order: newOrder });
 
-    // EMIT TO ADMINS
-    io.to('admin-room').emit('newOrder', newOrder);
-    console.log(`📢 Emitted real-time new order notification to admin room: ${newOrder.id}`);
+    // EMIT TO ADMINS - REMOVED (Only notify on payment success)
+    // io.to('admin-room').emit('newOrder', newOrder);
+    console.log(`📝 Order created in pending state: ${newOrder.id}`);
   } catch (error) {
     console.error('Failed to save order:', error);
     res.status(500).json({ success: false, error: 'Failed to save order history' });
@@ -430,7 +430,7 @@ app.get('/api/stats', async (req, res) => {
       });
     }
 
-    const recentOrders = await Order.find().sort({ date: -1 }).limit(10);
+    const recentOrders = await Order.find({ status: { $ne: 'pending' } }).sort({ date: -1 }).limit(10);
     
     res.status(200).json({
       dailyVisits,
@@ -447,7 +447,7 @@ app.get('/api/stats', async (req, res) => {
 // 5. Fetch All Orders for Order Management Page (NOW FROM MONGODB)
 app.get('/api/orders', async (req, res) => {
   try {
-    const orders = await Order.find().sort({ date: -1 });
+    const orders = await Order.find({ status: { $ne: 'pending' } }).sort({ date: -1 });
     res.status(200).json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });

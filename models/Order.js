@@ -18,6 +18,8 @@ const orderSchema = new mongoose.Schema({
   pinCode: { type: String },
   phone: { type: String },
   status: { type: String, default: 'pending' },
+  razorpayOrderId: { type: String },
+  razorpayPaymentId: { type: String },
   date: { type: Date, default: Date.now }
 }, { timestamps: true });
 

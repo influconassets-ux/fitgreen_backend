@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
+const Razorpay = require('razorpay');
+const crypto = require('crypto');
 
 // 1. STABLE CONNECTION: Use correct DNS module to force Google DNS so MongoDB connects on all ISPs
 const dns = require('node:dns');
@@ -60,6 +62,12 @@ if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PRIVATE_KEY !== 'YO
 } else {
   console.log('⚠️ WARNING: Firebase Admin credentials missing.');
 }
+
+// Razorpay Initialization
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
 
 const mongoose = require('mongoose');
 const User = require('./models/User');
@@ -279,6 +287,107 @@ app.post('/place-order', async (req, res) => {
   } catch (error) {
     console.error('Failed to save order:', error);
     res.status(500).json({ success: false, error: 'Failed to save order history' });
+  }
+});
+
+// --- RAZORPAY ROUTES ---
+
+// 1. Create Razorpay Order
+app.post('/api/razorpay/create-order', async (req, res) => {
+  const { amount, currency = 'INR', receipt } = req.body;
+  console.log(`💳 Razorpay Order Request Received: Amount=${amount}, Receipt=${receipt}`);
+  try {
+    const options = {
+      amount: Math.round(amount * 100), // convert to paise and ensure it's an integer
+      currency,
+      receipt,
+    };
+    const order = await razorpay.orders.create(options);
+    res.status(200).json({ success: true, order });
+  } catch (error) {
+    console.error('Razorpay order creation failed:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 2. Razorpay Webhook
+app.post('/api/razorpay/webhook', async (req, res) => {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  const signature = req.headers['x-razorpay-signature'];
+
+  const shasum = crypto.createHmac('sha256', secret);
+  shasum.update(JSON.stringify(req.body));
+  const digest = shasum.digest('hex');
+
+  if (signature === digest) {
+    const event = req.body.event;
+    const payload = req.body.payload;
+
+    if (event === 'order.paid') {
+      const razorpayOrderId = payload.order.entity.id;
+      const razorpayPaymentId = payload.payment.entity.id;
+
+      try {
+        // Find the order by razorpayOrderId and update status
+        const order = await Order.findOneAndUpdate(
+          { razorpayOrderId: razorpayOrderId },
+          { 
+            $set: { 
+              status: 'paid', 
+              razorpayPaymentId: razorpayPaymentId 
+            } 
+          },
+          { new: true }
+        );
+
+        if (order) {
+          console.log(`✅ Order ${order.id} marked as paid via webhook`);
+          
+          // Also update embedded order in User model
+          if (order.customerUid) {
+            await User.findOneAndUpdate(
+              { uid: order.customerUid, "orders.id": order.id },
+              { $set: { "orders.$.status": 'paid' } }
+            );
+          }
+
+          // Emit real-time update to user and admin
+          io.to('admin-room').emit('newOrder', order); // Notify admin of payment success
+          if (order.customerUid) {
+            io.to(order.customerUid).emit('statusUpdate', {
+              orderId: order.id,
+              status: 'paid'
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Webhook processing failed:', err);
+      }
+    } else if (event === 'payment.failed') {
+      const razorpayOrderId = payload.payment.entity.order_id;
+      try {
+        const order = await Order.findOneAndUpdate(
+          { razorpayOrderId: razorpayOrderId },
+          { $set: { status: 'failed' } },
+          { new: true }
+        );
+        if (order) {
+          console.log(`❌ Order ${order.id} marked as failed via webhook`);
+          if (order.customerUid) {
+            await User.findOneAndUpdate(
+              { uid: order.customerUid, "orders.id": order.id },
+              { $set: { "orders.$.status": 'failed' } }
+            );
+          }
+        }
+      } catch (err) {
+        console.error('Failure webhook processing failed:', err);
+      }
+    }
+    res.status(200).json({ status: 'ok' });
+  } else {
+    console.error('❌ Invalid Webhook Signature');
+    res.status(400).json({ status: 'invalid signature' });
   }
 });
 

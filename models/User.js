@@ -16,7 +16,9 @@ const userSchema = new mongoose.Schema({
       price: { type: String },
       quantity: { type: Number },
       image: { type: String },
-      type: { type: String }
+      type: { type: String },
+      desc: { type: String },
+      isCustom: { type: Boolean }
     }],
     total: { type: String },
     address: { type: String },

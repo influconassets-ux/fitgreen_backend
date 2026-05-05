@@ -4,6 +4,13 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // 1. STABLE CONNECTION: Use correct DNS module to force Google DNS so MongoDB connects on all ISPs
 const dns = require('node:dns');
@@ -76,6 +83,8 @@ const Order = require('./models/Order');
 const Visit = require('./models/Visit');
 const Coupon = require('./models/Coupon');
 const Tip = require('./models/Tip');
+const CorporateOrder = require('./models/CorporateOrder');
+const CorporateClient = require('./models/CorporateClient');
 
 // --- COUPON ROUTES ---
 
@@ -190,6 +199,13 @@ app.get('/api/products', async (req, res) => {
 app.post('/api/products', async (req, res) => {
   const productData = req.body;
   try {
+    if (productData.img && productData.img.startsWith('data:image')) {
+      console.log('Uploading product image to Cloudinary...');
+      const uploadRes = await cloudinary.uploader.upload(productData.img, { folder: 'fitgreen_products' });
+      productData.img = uploadRes.secure_url;
+      console.log('Upload complete:', productData.img);
+    }
+
     const product = await Product.findOneAndUpdate(
       { id: productData.id },
       { $set: { ...productData, updatedAt: new Date() } },
@@ -235,12 +251,25 @@ app.post('/verify-token', async (req, res) => {
     if (profileData?.address) updateData.address = profileData?.address;
     if (profileData?.pinCode) updateData.pinCode = profileData?.pinCode;
     if (profileData?.city) updateData.city = profileData?.city;
-    if (profileData?.photo) updateData.photo = profileData?.photo;
+    
+    if (profileData?.photo) {
+      if (profileData.photo.startsWith('data:image')) {
+        try {
+          const uploadRes = await cloudinary.uploader.upload(profileData.photo, { folder: 'fitgreen_profiles' });
+          updateData.photo = uploadRes.secure_url;
+        } catch (err) {
+          console.error('Failed to upload profile photo to Cloudinary:', err.message);
+          updateData.photo = profileData.photo;
+        }
+      } else {
+        updateData.photo = profileData.photo;
+      }
+    }
 
     let user = await User.findOneAndUpdate(
       { uid },
       { $set: updateData },
-      { upsert: true, returnDocument: 'after' }
+      { upsert: true, new: true }
     );
 
     res.status(200).json({ success: true, user });
@@ -447,7 +476,8 @@ app.get('/api/stats', async (req, res) => {
 // 5. Fetch All Orders for Order Management Page (NOW FROM MONGODB)
 app.get('/api/orders', async (req, res) => {
   try {
-    const orders = await Order.find({ status: { $ne: 'pending' } }).sort({ date: -1 });
+    const orders = await Order.find({ status: { $ne: 'pending' } })
+      .sort({ date: -1 });
     res.status(200).json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -523,7 +553,7 @@ app.get('/api/orders/user/:uid', async (req, res) => {
 // 6. Fetch All Customers for Customer Management Page
 app.get('/api/customers', async (req, res) => {
   try {
-    const users = await User.find().sort({ createdAt: -1 });
+    const users = await User.find().select('-orders.items.image').sort({ createdAt: -1 });
     res.status(200).json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -546,6 +576,82 @@ app.post('/api/admin/login', (req, res) => {
     res.status(200).json({ success: true, token: 'fitgreen-admin-master-key' });
   } else {
     res.status(401).json({ success: false, message: 'Invalid credentials' });
+  }
+});
+
+// --- CORPORATE ORDERS ---
+app.post('/api/corporate-orders', async (req, res) => {
+  try {
+    const newOrder = new CorporateOrder(req.body);
+    await newOrder.save();
+    res.status(201).json(newOrder);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/corporate-orders', async (req, res) => {
+  try {
+    const orders = await CorporateOrder.find().sort({ createdAt: -1 });
+    res.status(200).json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/corporate-orders/:id', async (req, res) => {
+  try {
+    const updatedOrder = await CorporateOrder.findByIdAndUpdate(
+      req.params.id,
+      { status: req.body.status },
+      { new: true }
+    );
+    res.status(200).json(updatedOrder);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- CORPORATE CLIENTS ---
+app.post('/api/corporate-clients', async (req, res) => {
+  try {
+    const { email, password, companyName } = req.body;
+    const newClient = new CorporateClient({ email, password, companyName });
+    await newClient.save();
+    res.status(201).json(newClient);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/corporate-clients', async (req, res) => {
+  try {
+    const clients = await CorporateClient.find().sort({ createdAt: -1 });
+    res.status(200).json(clients);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/corporate-clients/:id', async (req, res) => {
+  try {
+    await CorporateClient.findByIdAndDelete(req.params.id);
+    res.status(200).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/corporate-login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const client = await CorporateClient.findOne({ email, password });
+    if (!client) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+    res.status(200).json({ success: true, client });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

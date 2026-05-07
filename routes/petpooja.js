@@ -31,6 +31,39 @@ router.get('/categories', async (req, res) => {
   }
 });
 
+// Admin Panel Fetch All Items (Including out of stock)
+router.get('/items-all', async (req, res) => {
+  try {
+    const items = await MenuItem.find().sort({ updatedAt: -1 });
+    res.status(200).json(items);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Panel Update Item (Custom properties like macros, images)
+router.put('/items/:id', async (req, res) => {
+  try {
+    const updateData = req.body;
+    
+    // Cloudinary upload if an image was updated (using similar logic as Product.js)
+    const cloudinary = require('cloudinary').v2;
+    if (updateData.image && updateData.image.startsWith('data:image')) {
+      const uploadRes = await cloudinary.uploader.upload(updateData.image, { folder: 'fitgreen_products' });
+      updateData.image = uploadRes.secure_url;
+    }
+
+    const item = await MenuItem.findOneAndUpdate(
+      { itemId: req.params.id },
+      { $set: updateData },
+      { returnDocument: 'after' }
+    );
+    res.status(200).json({ success: true, item });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/items', async (req, res) => {
   try {
     const items = await MenuItem.find({ available: true });

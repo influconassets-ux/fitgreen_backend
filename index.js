@@ -92,6 +92,37 @@ const CorporateClient = require('./models/CorporateClient');
 const petpoojaRoutes = require('./routes/petpooja');
 app.use('/api/petpooja', petpoojaRoutes);
 
+// Shortcut for grouped menu as requested
+const Category = require('./models/Category');
+const MenuItem = require('./models/MenuItem');
+
+app.get('/api/menu', async (req, res) => {
+  try {
+    const categories = await Category.find().sort({ sortOrder: 1 });
+    const items = await MenuItem.find({ available: true }).sort({ sortOrder: 1 });
+    
+    const menu = categories.map(cat => {
+      const catItems = items.filter(item => item.petpoojaCategoryId === cat.petpoojaCategoryId);
+      return {
+        categoryName: cat.name,
+        items: catItems.map(item => ({
+          name: item.name,
+          price: item.price,
+          petpoojaItemId: item.petpoojaItemId,
+          image: item.image,
+          description: item.description,
+          available: item.available
+        }))
+      };
+    }).filter(cat => cat.items.length > 0);
+    
+    res.status(200).json(menu);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // --- COUPON ROUTES ---
 
 // 1. Fetch all coupons (Admin)

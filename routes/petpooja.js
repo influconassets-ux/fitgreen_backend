@@ -43,14 +43,33 @@ function normalizePetpoojaStatus(status) {
 let storeStatus = "OPEN";
 
 // --- FRONTEND MENU APIs ---
+// Grouped Menu for Frontend
 router.get('/menu', async (req, res) => {
   try {
-    const restaurants = await Restaurant.find();
-    res.status(200).json(restaurants);
+    const categories = await Category.find().sort({ sortOrder: 1 });
+    const items = await MenuItem.find({ available: true }).sort({ sortOrder: 1 });
+    
+    const menu = categories.map(cat => {
+      const catItems = items.filter(item => item.petpoojaCategoryId === cat.petpoojaCategoryId);
+      return {
+        categoryName: cat.name,
+        items: catItems.map(item => ({
+          name: item.name,
+          price: item.price,
+          petpoojaItemId: item.petpoojaItemId,
+          image: item.image,
+          description: item.description,
+          available: item.available
+        }))
+      };
+    }).filter(cat => cat.items.length > 0);
+    
+    res.status(200).json(menu);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 router.get('/categories', async (req, res) => {
   try {
@@ -152,8 +171,9 @@ router.post('/menu', async (req, res) => {
           // Check if it's a category
           if (node.categoryid && node.categoryname) {
             extractedCategories.push({
-              categoryId: node.categoryid,
+              petpoojaCategoryId: node.categoryid,
               name: node.categoryname,
+              sortOrder: parseInt(node.categoryrank) || 0,
               restaurantId: restId
             });
             currentCatId = node.categoryid;
@@ -162,14 +182,16 @@ router.post('/menu', async (req, res) => {
           // Check if it's an item
           if (node.itemid && (node.itemname || node.name)) {
             extractedItems.push({
-              itemId: node.itemid,
-              restaurantId: restId,
-              categoryId: node.item_categoryid || node.categoryid || currentCatId || 'default',
+              petpoojaItemId: node.itemid,
               name: node.itemname || node.name,
               price: parseFloat(node.item_price) || parseFloat(node.price) || 0,
+              petpoojaCategoryId: node.item_categoryid || node.categoryid || currentCatId || 'default',
               available: node.active === "1" || node.in_stock === "1" || node.in_stock === "2" || node.available === true,
+              sortOrder: parseInt(node.itemrank) || 0,
+              restaurantId: restId,
               image: node.item_image_url || node.image || '',
-              description: node.itemdescription || node.item_description || node.description || ''
+              description: node.itemdescription || node.item_description || node.description || '',
+              itemId: node.itemid // Compatibility
             });
           }
 
@@ -192,7 +214,7 @@ router.post('/menu', async (req, res) => {
             }
           }
 
-          // Recursively traverse all keys (parentcategories, categories, items, attributes)
+          // Recursively traverse all keys
           for (const key of Object.keys(node)) {
             if (typeof node[key] === 'object' && node[key] !== null) {
               parseNode(node[key], currentCatId);
@@ -204,22 +226,26 @@ router.post('/menu', async (req, res) => {
         parseNode(payload);
 
         // Save Categories
+        const catMap = {};
         for (const cat of extractedCategories) {
-          await Category.findOneAndUpdate(
-            { categoryId: cat.categoryId },
-            { categoryId: cat.categoryId, restaurantId: cat.restaurantId, name: cat.name },
-            { upsert: true }
+          const savedCat = await Category.findOneAndUpdate(
+            { petpoojaCategoryId: cat.petpoojaCategoryId },
+            cat,
+            { upsert: true, new: true }
           );
+          catMap[cat.petpoojaCategoryId] = savedCat._id;
         }
 
         // Save Items
         for (const item of extractedItems) {
+          item.categoryId = catMap[item.petpoojaCategoryId];
           await MenuItem.findOneAndUpdate(
-            { itemId: item.itemId },
+            { petpoojaItemId: item.petpoojaItemId },
             item,
             { upsert: true }
           );
         }
+
 
         // Save Addons
         for (const addon of extractedAddons) {
@@ -270,10 +296,11 @@ router.post('/item-off', async (req, res) => {
     
     if (itemID) {
       const result = await MenuItem.findOneAndUpdate(
-        { itemId: itemID }, 
+        { $or: [{ petpoojaItemId: itemID }, { itemId: itemID }] }, 
         { available: false },
         { new: true }
       );
+
       if (result) {
         console.log(`✅ Item ${itemID} (${result.name}) marked as OUT OF STOCK`);
       } else {
@@ -306,10 +333,11 @@ router.post('/item-on', async (req, res) => {
     
     if (itemID) {
       const result = await MenuItem.findOneAndUpdate(
-        { itemId: itemID }, 
+        { $or: [{ petpoojaItemId: itemID }, { itemId: itemID }] }, 
         { available: true },
         { new: true }
       );
+
       if (result) {
         console.log(`✅ Item ${itemID} (${result.name}) marked as AVAILABLE`);
       } else {

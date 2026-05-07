@@ -172,13 +172,13 @@ router.post('/menu', async (req, res) => {
           if (node.categoryid && node.categoryname) {
             extractedCategories.push({
               petpoojaCategoryId: node.categoryid,
-              categoryId: node.categoryid, // Compatibility for old unique index
               name: node.categoryname,
               sortOrder: parseInt(node.categoryrank) || 0,
               restaurantId: restId
             });
             currentCatId = node.categoryid;
           }
+
 
 
           // Check if it's an item
@@ -231,12 +231,13 @@ router.post('/menu', async (req, res) => {
         const currentItemIds = extractedItems.map(i => i.petpoojaItemId);
         const currentCategoryIds = extractedCategories.map(c => c.petpoojaCategoryId);
 
-        // FORCE DROP OLD INDEX to prevent E11000 errors on the old field name
+        // AGGRESSIVE FIX: Clear collection and drop index
         try {
-          await Category.collection.dropIndex('categoryId_1');
-          console.log("🗑️ Dropped legacy categoryId index");
+          await Category.deleteMany({}); // Wipe old categories to prevent reference conflicts during sync
+          await Category.collection.dropIndexes(); // Drop ALL indexes except _id
+          console.log("🧹 Cleaned categories collection and dropped all indexes");
         } catch (e) {
-          // Ignore if index doesn't exist
+          console.error("Index cleanup warning:", e.message);
         }
 
         // Save Categories

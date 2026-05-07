@@ -86,6 +86,10 @@ const Tip = require('./models/Tip');
 const CorporateOrder = require('./models/CorporateOrder');
 const CorporateClient = require('./models/CorporateClient');
 
+// --- PETPOOJA INTEGRATION ---
+const petpoojaRoutes = require('./routes/petpooja');
+app.use('/api/petpooja', petpoojaRoutes);
+
 // --- COUPON ROUTES ---
 
 // 1. Fetch all coupons (Admin)

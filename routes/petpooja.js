@@ -396,6 +396,7 @@ router.post('/order-status', async (req, res) => {
       // Real-time update (Step 7 extension)
       const io = req.app.get('socketio');
       if (io && order.customerUid) {
+        console.log(`📢 Attempting to emit statusUpdate to user: ${order.customerUid}`);
         io.to(order.customerUid).emit('statusUpdate', {
           orderId: order.id,
           status: order.status
@@ -403,10 +404,17 @@ router.post('/order-status', async (req, res) => {
         
         // Also update User embedded order
         const User = require('../models/User');
-        await User.findOneAndUpdate(
+        const userUpdate = await User.findOneAndUpdate(
           { uid: order.customerUid, "orders.id": order.id },
-          { $set: { "orders.$.status": order.status } }
+          { $set: { "orders.$.status": order.status } },
+          { new: true }
         );
+        
+        if (userUpdate) {
+          console.log(`✅ Successfully updated status in User ${order.customerUid} embedded orders.`);
+        } else {
+          console.warn(`⚠️ Could not find User ${order.customerUid} with Order ${order.id} in their profile.`);
+        }
       }
     } else {
       logData.errorMessage = "Order not found in database";

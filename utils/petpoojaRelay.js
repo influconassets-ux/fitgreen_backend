@@ -31,6 +31,7 @@ async function relayOrderToPetpooja(orderData) {
           Order: {
             details: {
               orderID: orderData.id || `FG${Date.now()}`,
+              clientOrderID: orderData.id,
               order_type: "Delivery",
               payment_type: "Prepaid",
               total: parseFloat(typeof orderData.total === 'string' ? orderData.total.replace(/[^\d.-]/g, '') : orderData.total) || 0,

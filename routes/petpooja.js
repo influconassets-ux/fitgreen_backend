@@ -267,38 +267,82 @@ router.post('/update-store-status', (req, res) => {
 // 6. ORDER STATUS CALLBACK
 router.post('/order-status', async (req, res) => {
   try {
-    // Petpooja typically sends orderID, status
-    const { orderID, status, clientOrderID } = req.body;
+    const payload = req.body;
+    console.log('Received Petpooja Order Status Webhook:', JSON.stringify(payload));
+
+    // Save raw payload to DB for debugging
+    const mongoose = require('mongoose');
+    const db = mongoose.connection;
+    await db.collection('webhooklogs').insertOne({ 
+      timestamp: new Date(), 
+      type: 'order_status', 
+      payload: payload 
+    });
+
+    // Petpooja typically sends orderID, status, clientOrderID
+    // Handle multiple possible key formats
+    const orderID = payload.orderID || payload.order_id || payload.orderid;
+    const clientOrderID = payload.clientOrderID || payload.client_order_id || payload.clientorderid;
+    const status = payload.status || payload.order_status || payload.orderstatus;
     
     if (clientOrderID || orderID) {
       const orderIdToFind = clientOrderID || orderID;
+      
+      // Map Petpooja numeric status to strings if necessary
+      const statusMap = {
+        "1": "placed",
+        "2": "accepted",
+        "3": "cancelled",
+        "4": "dispatched",
+        "5": "delivered",
+        "6": "food ready",
+        "7": "out for delivery"
+      };
+
+      let mappedStatus = status;
+      if (statusMap[status]) {
+        mappedStatus = statusMap[status];
+      } else if (typeof status === 'string') {
+        mappedStatus = status.toLowerCase();
+      }
+
+      console.log(`Searching for order: ${orderIdToFind} to update status to: ${mappedStatus}`);
+
       const order = await Order.findOneAndUpdate(
         { id: orderIdToFind },
-        { status: status ? status.toLowerCase() : 'updated' },
+        { status: mappedStatus || 'updated' },
         { returnDocument: 'after' }
       );
 
-      if (order && order.customerUid) {
-        // 1. Sync to User's embedded order array
-        const User = require('../models/User');
-        await User.findOneAndUpdate(
-          { uid: order.customerUid, "orders.id": order.id },
-          { $set: { "orders.$.status": order.status } }
-        );
+      if (order) {
+        console.log(`✅ Found and updated order ${order.id}. New status: ${order.status}`);
+        if (order.customerUid) {
+          // 1. Sync to User's embedded order array
+          const User = require('../models/User');
+          await User.findOneAndUpdate(
+            { uid: order.customerUid, "orders.id": order.id },
+            { $set: { "orders.$.status": order.status } }
+          );
 
-        // 2. Emit Real-time update if io is available
-        const io = req.app.get('socketio');
-        if (io) {
-          io.to(order.customerUid).emit('statusUpdate', {
-            orderId: order.id,
-            status: order.status
-          });
-          console.log(`📢 Emitted Petpooja status update to user: ${order.customerUid}`);
+          // 2. Emit Real-time update if io is available
+          const io = req.app.get('socketio');
+          if (io) {
+            io.to(order.customerUid).emit('statusUpdate', {
+              orderId: order.id,
+              status: order.status
+            });
+            console.log(`📢 Emitted Petpooja status update to user: ${order.customerUid}`);
+          }
         }
+      } else {
+        console.warn(`⚠️ Order with ID ${orderIdToFind} not found in DB.`);
       }
+    } else {
+      console.warn('⚠️ Petpooja status update missing orderID or clientOrderID', payload);
     }
     
-    res.status(200).json({ success: '1', message: 'Order status updated successfully' });
+    // Petpooja expects { "success": "1" } or similar
+    res.status(200).json({ success: '1', message: 'Order status update processed' });
   } catch (error) {
     console.error('Order Status Callback Error:', error);
     res.status(500).json({ success: '0', message: error.message });
@@ -362,6 +406,20 @@ router.post('/update-order-status', async (req, res) => {
     console.error('Update Order Status Error:', error.response ? error.response.data : error.message);
     res.status(500).json({ success: false, message: error.message });
   }
+});
+
+// CATCH-ALL FOR ANY UNHANDLED PETPOOJA WEBHOOKS
+router.post('*', async (req, res) => {
+  console.log(`⚠️ Unhandled Petpooja Webhook on ${req.path}:`, JSON.stringify(req.body));
+  const mongoose = require('mongoose');
+  const db = mongoose.connection;
+  await db.collection('webhooklogs').insertOne({ 
+    timestamp: new Date(), 
+    type: 'unhandled_webhook', 
+    path: req.path,
+    payload: req.body 
+  });
+  res.status(200).json({ success: '1', message: 'Logged' });
 });
 
 module.exports = router;

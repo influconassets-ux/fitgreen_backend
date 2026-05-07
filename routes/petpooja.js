@@ -134,12 +134,12 @@ router.post('/menu', async (req, res) => {
             extractedItems.push({
               itemId: node.itemid,
               restaurantId: restId,
-              categoryId: node.categoryid || currentCatId || 'default',
+              categoryId: node.item_categoryid || node.categoryid || currentCatId || 'default',
               name: node.itemname || node.name,
               price: parseFloat(node.item_price) || parseFloat(node.price) || 0,
-              available: node.item_allow_variation === "1" ? true : (node.in_stock === "1" || node.in_stock === true || node.available === true),
+              available: node.active === "1" || node.in_stock === "1" || node.in_stock === "2" || node.available === true,
               image: node.item_image_url || node.image || '',
-              description: node.item_description || node.description || ''
+              description: node.itemdescription || node.item_description || node.description || ''
             });
           }
 
@@ -170,13 +170,8 @@ router.post('/menu', async (req, res) => {
           }
         }
 
-        // Run the recursive parser on the restaurant data (excluding details to avoid unnecessary traversal)
-        parseNode({
-          parentcategories: restData.parentcategories,
-          categories: restData.categories,
-          items: restData.items,
-          attributes: restData.attributes
-        });
+        // Run the recursive parser on the entire payload
+        parseNode(payload);
 
         // Save Categories
         for (const cat of extractedCategories) {

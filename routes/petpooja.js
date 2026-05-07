@@ -10,6 +10,27 @@ const Addon = require('../models/Addon');
 const Order = require('../models/Order');
 const { relayOrderToPetpooja } = require('../utils/petpoojaRelay');
 
+// --- HELPER: NORMALIZE STATUS (Step 5) ---
+function normalizePetpoojaStatus(status) {
+  const value = String(status).toLowerCase();
+  const map = {
+    accepted: "accepted",
+    accept: "accepted",
+    confirmed: "accepted",
+    rejected: "rejected",
+    reject: "rejected",
+    cancelled: "cancelled",
+    canceled: "cancelled",
+    preparing: "preparing",
+    food_ready: "ready",
+    ready: "ready",
+    dispatched: "dispatched",
+    delivered: "delivered",
+    completed: "delivered"
+  };
+  return map[value] || value;
+}
+
 // Store Status Variable (in-memory for now, could be DB)
 let storeStatus = "OPEN";
 
@@ -308,88 +329,111 @@ router.post('/update-store-status', (req, res) => {
   res.status(200).json({ success: '1', message: 'Store status updated' });
 });
 
-// 6. ORDER STATUS CALLBACK
+// 6. ORDER STATUS CALLBACK (Step 1 & 4)
 router.post('/order-status', async (req, res) => {
+  let orderID = "UNKNOWN";
   try {
     const payload = req.body;
-    console.log('Received Petpooja Order Status Webhook:', JSON.stringify(payload));
+    console.log("PETPOOJA ORDER STATUS CALLBACK:", JSON.stringify(payload, null, 2));
 
-    // Save raw payload to DB for debugging
+    orderID =
+      payload.orderID ||
+      payload.order_id ||
+      payload.orderid ||
+      payload.clientOrderID ||
+      payload.client_order_id;
+
+    const status =
+      payload.status ||
+      payload.order_status ||
+      payload.orderStatus;
+
+    // Step 8: Log Callback
     const mongoose = require('mongoose');
     const db = mongoose.connection;
-    await db.collection('webhooklogs').insertOne({ 
-      timestamp: new Date(), 
-      type: 'order_status', 
-      payload: payload 
-    });
+    const logData = {
+      orderID: orderID,
+      type: "order_status",
+      rawPayload: payload,
+      receivedAt: new Date(),
+      processed: false
+    };
 
-    // Petpooja typically sends orderID, status, clientOrderID
-    // Handle multiple possible key formats
-    const orderID = payload.orderID || payload.order_id || payload.orderid;
-    const clientOrderID = payload.clientOrderID || payload.client_order_id || payload.clientorderid;
-    const status = payload.status || payload.order_status || payload.orderstatus;
-    
-    if (clientOrderID || orderID) {
-      const orderIdToFind = clientOrderID || orderID;
+    if (!orderID || !status) {
+      logData.errorMessage = "Missing orderID or status";
+      await db.collection('petpooja_callback_logs').insertOne(logData);
+      return res.status(400).json({
+        success: false,
+        message: "Missing orderID or status"
+      });
+    }
+
+    const normalizedStatus = normalizePetpoojaStatus(status);
+    console.log(`Searching for order: ${orderID} to update status to: ${normalizedStatus}`);
+
+    const order = await Order.findOneAndUpdate(
+      { id: orderID }, // Step 3: Use local ID mapping
+      {
+        status: normalizedStatus,
+        petpoojaCallbackRaw: payload,
+        lastStatusUpdatedAt: new Date()
+      },
+      { returnDocument: 'after' }
+    );
+
+    if (order) {
+      logData.processed = true;
+      console.log(`✅ Order ${order.id} updated to ${order.status}`);
       
-      // Map Petpooja numeric status to strings if necessary
-      const statusMap = {
-        "1": "placed",
-        "2": "accepted",
-        "3": "cancelled",
-        "4": "dispatched",
-        "5": "delivered",
-        "6": "food ready",
-        "7": "out for delivery"
-      };
-
-      let mappedStatus = status;
-      if (statusMap[status]) {
-        mappedStatus = statusMap[status];
-      } else if (typeof status === 'string') {
-        mappedStatus = status.toLowerCase();
-      }
-
-      console.log(`Searching for order: ${orderIdToFind} to update status to: ${mappedStatus}`);
-
-      const order = await Order.findOneAndUpdate(
-        { id: orderIdToFind },
-        { status: mappedStatus || 'updated' },
-        { returnDocument: 'after' }
-      );
-
-      if (order) {
-        console.log(`✅ Found and updated order ${order.id}. New status: ${order.status}`);
-        if (order.customerUid) {
-          // 1. Sync to User's embedded order array
-          const User = require('../models/User');
-          await User.findOneAndUpdate(
-            { uid: order.customerUid, "orders.id": order.id },
-            { $set: { "orders.$.status": order.status } }
-          );
-
-          // 2. Emit Real-time update if io is available
-          const io = req.app.get('socketio');
-          if (io) {
-            io.to(order.customerUid).emit('statusUpdate', {
-              orderId: order.id,
-              status: order.status
-            });
-            console.log(`📢 Emitted Petpooja status update to user: ${order.customerUid}`);
-          }
-        }
-      } else {
-        console.warn(`⚠️ Order with ID ${orderIdToFind} not found in DB.`);
+      // Real-time update (Step 7 extension)
+      const io = req.app.get('socketio');
+      if (io && order.customerUid) {
+        io.to(order.customerUid).emit('statusUpdate', {
+          orderId: order.id,
+          status: order.status
+        });
+        
+        // Also update User embedded order
+        const User = require('../models/User');
+        await User.findOneAndUpdate(
+          { uid: order.customerUid, "orders.id": order.id },
+          { $set: { "orders.$.status": order.status } }
+        );
       }
     } else {
-      console.warn('⚠️ Petpooja status update missing orderID or clientOrderID', payload);
+      logData.errorMessage = "Order not found in database";
     }
+
+    await db.collection('petpooja_callback_logs').insertOne(logData);
     
-    // Petpooja expects { "success": "1" } or similar
-    res.status(200).json({ success: '1', message: 'Order status update processed' });
+    return res.status(200).json({
+      success: true,
+      message: "Order status updated"
+    });
+
   } catch (error) {
-    console.error('Order Status Callback Error:', error);
-    res.status(500).json({ success: '0', message: error.message });
+    console.error("Petpooja callback error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+});
+
+// Step 6: Add Order Status API for Frontend
+router.get('/order-status/:orderID', async (req, res) => {
+  try {
+    const order = await Order.findOne({ id: req.params.orderID });
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+    res.status(200).json({
+      success: true,
+      orderID: order.id,
+      status: order.status
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

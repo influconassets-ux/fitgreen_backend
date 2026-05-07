@@ -10,6 +10,7 @@ async function relayOrderToPetpooja(orderData) {
       app_secret: process.env.PETPOOJA_APP_SECRET,
       access_token: process.env.PETPOOJA_ACCESS_TOKEN,
       restID: 'f871uxkp', // Mapped restID from plan
+      callback_url: `${process.env.BASE_URL || 'https://fitgreen-backend.onrender.com'}/api/petpooja/order-status`,
       orderinfo: {
         OrderInfo: {
           Restaurant: {

@@ -23,6 +23,8 @@ const orderSchema = new mongoose.Schema({
   status: { type: String, default: 'pending' },
   razorpayOrderId: { type: String },
   razorpayPaymentId: { type: String },
+  minimumPrepTime: { type: Number },
+  minimumDeliveryTime: { type: Number },
   date: { type: Date, default: Date.now }
 }, { timestamps: true });
 

@@ -384,6 +384,8 @@ router.post('/order-status', async (req, res) => {
       {
         status: normalizedStatus,
         petpoojaCallbackRaw: payload,
+        minimumPrepTime: payload.minimum_prep_time || payload.minimum_prep_time === 0 ? payload.minimum_prep_time : undefined,
+        minimumDeliveryTime: payload.minimum_delivery_time || payload.minimum_delivery_time === 0 ? payload.minimum_delivery_time : undefined,
         lastStatusUpdatedAt: new Date()
       },
       { returnDocument: 'after' }

@@ -34,6 +34,7 @@ async function relayOrderToPetpooja(orderData) {
             details: {
               orderID: orderData.id || `FG${Date.now()}`,
               clientOrderID: orderData.id,
+              callback_url: `${process.env.BASE_URL || 'https://fitgreen-backend.onrender.com'}/api/petpooja/order-status`,
               order_type: "Delivery",
               payment_type: "Prepaid",
               total: parseFloat(typeof orderData.total === 'string' ? orderData.total.replace(/[^\d.-]/g, '') : orderData.total) || 0,

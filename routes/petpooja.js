@@ -95,57 +95,114 @@ router.post('/menu', async (req, res) => {
           { upsert: true, returnDocument: 'after' }
         );
 
-        // Save Categories
-        if (restData.categories && Array.isArray(restData.categories)) {
-          for (const cat of restData.categories) {
-            await Category.findOneAndUpdate(
-              { categoryId: cat.categoryid },
-              { categoryId: cat.categoryid, restaurantId: restId, name: cat.categoryname },
-              { upsert: true }
-            );
+        // Robust Extraction Function for deep nesting
+        const extractedCategories = [];
+        const extractedItems = [];
+        const extractedVariants = [];
+        const extractedAddons = [];
+
+        function parseNode(node, currentCatId = null) {
+          if (!node || typeof node !== 'object') return;
+
+          // If it's an array, iterate
+          if (Array.isArray(node)) {
+            node.forEach(child => parseNode(child, currentCatId));
+            return;
           }
+
+          // Check if it's a category
+          if (node.categoryid && node.categoryname) {
+            extractedCategories.push({
+              categoryId: node.categoryid,
+              name: node.categoryname,
+              restaurantId: restId
+            });
+            currentCatId = node.categoryid;
+          }
+
+          // Check if it's an item
+          if (node.itemid && (node.itemname || node.name)) {
+            extractedItems.push({
+              itemId: node.itemid,
+              restaurantId: restId,
+              categoryId: node.categoryid || currentCatId || 'default',
+              name: node.itemname || node.name,
+              price: parseFloat(node.item_price) || parseFloat(node.price) || 0,
+              available: node.item_allow_variation === "1" ? true : (node.in_stock === "1" || node.in_stock === true || node.available === true),
+              image: node.item_image_url || node.image || '',
+              description: node.item_description || node.description || ''
+            });
+          }
+
+          // Check if it's an attribute/variant
+          if (node.attributeid && node.attributename) {
+            if (node.attribute_type === 'addon') {
+              extractedAddons.push({
+                addonId: node.attributeid,
+                itemId: node.itemid || 'unknown',
+                name: node.attributename,
+                price: parseFloat(node.price) || 0
+              });
+            } else {
+              extractedVariants.push({
+                variantId: node.attributeid,
+                itemId: node.itemid || 'unknown',
+                name: node.attributename,
+                price: parseFloat(node.price) || 0
+              });
+            }
+          }
+
+          // Recursively traverse all keys (parentcategories, categories, items, attributes)
+          for (const key of Object.keys(node)) {
+            if (typeof node[key] === 'object' && node[key] !== null) {
+              parseNode(node[key], currentCatId);
+            }
+          }
+        }
+
+        // Run the recursive parser on the restaurant data (excluding details to avoid unnecessary traversal)
+        parseNode({
+          parentcategories: restData.parentcategories,
+          categories: restData.categories,
+          items: restData.items,
+          attributes: restData.attributes
+        });
+
+        // Save Categories
+        for (const cat of extractedCategories) {
+          await Category.findOneAndUpdate(
+            { categoryId: cat.categoryId },
+            { categoryId: cat.categoryId, restaurantId: cat.restaurantId, name: cat.name },
+            { upsert: true }
+          );
         }
 
         // Save Items
-        if (restData.items && Array.isArray(restData.items)) {
-          for (const item of restData.items) {
-            await MenuItem.findOneAndUpdate(
-              { itemId: item.itemid },
-              {
-                itemId: item.itemid,
-                restaurantId: restId,
-                categoryId: item.categoryid,
-                name: item.itemname,
-                price: parseFloat(item.item_price) || parseFloat(item.price) || 0,
-                available: item.item_allow_variation === "1" ? true : (item.in_stock === "1" || item.in_stock === true || item.available === true),
-                image: item.item_image_url || item.image || '',
-                description: item.item_description || item.description || ''
-              },
-              { upsert: true }
-            );
-          }
+        for (const item of extractedItems) {
+          await MenuItem.findOneAndUpdate(
+            { itemId: item.itemId },
+            item,
+            { upsert: true }
+          );
         }
 
-        // Save Variants & Addons (from attributes)
-        if (restData.attributes && Array.isArray(restData.attributes)) {
-          for (const attr of restData.attributes) {
-            // Petpooja mixes variants and addons here, distinguishing by some fields
-            // Assuming simplified mapping based on plan requirements
-            const itemId = attr.itemid;
-            if (attr.attribute_type === 'addon') {
-              await Addon.findOneAndUpdate(
-                { addonId: attr.attributeid },
-                { addonId: attr.attributeid, itemId: itemId, name: attr.attributename, price: parseFloat(attr.price) || 0 },
-                { upsert: true }
-              );
-            } else {
-              await Variant.findOneAndUpdate(
-                { variantId: attr.attributeid },
-                { variantId: attr.attributeid, itemId: itemId, name: attr.attributename, price: parseFloat(attr.price) || 0 },
-                { upsert: true }
-              );
-            }
-          }
+        // Save Addons
+        for (const addon of extractedAddons) {
+          await Addon.findOneAndUpdate(
+            { addonId: addon.addonId },
+            addon,
+            { upsert: true }
+          );
+        }
+
+        // Save Variants
+        for (const variant of extractedVariants) {
+          await Variant.findOneAndUpdate(
+            { variantId: variant.variantId },
+            variant,
+            { upsert: true }
+          );
         }
       }
     } else {

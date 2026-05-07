@@ -5,6 +5,7 @@ const admin = require('firebase-admin');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const cloudinary = require('cloudinary').v2;
+const { relayOrderToPetpooja } = require('./utils/petpoojaRelay');
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -375,6 +376,14 @@ app.post('/api/razorpay/webhook', async (req, res) => {
 
         if (order) {
           console.log(`✅ Order ${order.id} marked as paid via webhook`);
+          
+          // --- TRIGGER PETPOOJA RELAY ---
+          try {
+            await relayOrderToPetpooja(order);
+          } catch (relayErr) {
+            console.error(`Failed to relay order ${order.id} to Petpooja:`, relayErr.message);
+          }
+          // ------------------------------
           
           // Also update embedded order in User model
           if (order.customerUid) {

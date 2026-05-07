@@ -8,6 +8,7 @@ const MenuItem = require('../models/MenuItem');
 const Variant = require('../models/Variant');
 const Addon = require('../models/Addon');
 const Order = require('../models/Order');
+const { relayOrderToPetpooja } = require('../utils/petpoojaRelay');
 
 // Store Status Variable (in-memory for now, could be DB)
 let storeStatus = "OPEN";
@@ -294,71 +295,14 @@ router.post('/orders', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid order payload' });
     }
 
-    // Prepare Save Order payload for Petpooja
-    const petpoojaPayload = {
-      app_key: process.env.PETPOOJA_APP_KEY,
-      app_secret: process.env.PETPOOJA_APP_SECRET,
-      access_token: process.env.PETPOOJA_ACCESS_TOKEN,
-      restID: 'f871uxkp', // Mapped restID from plan
-      orderinfo: {
-        OrderInfo: {
-          Restaurant: {
-            details: {
-              res_name: "FitGreen",
-              address: "FitGreen Address",
-              contact_information: "9999999999",
-              restID: "f871uxkp"
-            }
-          },
-          Customer: {
-            details: {
-              name: orderData.customerName || 'Customer',
-              email: orderData.customerEmail || '',
-              phone: orderData.phone || '9999999999',
-              address: orderData.address || 'N/A'
-            }
-          },
-          Order: {
-            details: {
-              orderID: orderData.id || `FG${Date.now()}`,
-              order_type: "Delivery", // Can be Delivery, PickUp, DineIn
-              payment_type: "Prepaid",
-              total: parseFloat(orderData.total) || 0,
-              tax_total: 0,
-              created_on: new Date().toISOString()
-            }
-          },
-          OrderItem: {
-            details: orderData.items.map(item => ({
-              id: item.itemId || item.id, // Must be from Menu Push
-              name: item.name,
-              price: parseFloat(item.price) || 0,
-              final_price: parseFloat(item.price) || 0,
-              quantity: item.quantity || 1,
-              variation_id: item.variation_id || item.variantId || "",
-              item_tax: []
-            }))
-          }
-        }
-      }
-    };
-
     // Save order locally first
     const newOrder = new Order(orderData);
     await newOrder.save();
 
-    // Relay to Petpooja Save Order API
-    const saveOrderUrl = process.env.PETPOOJA_SAVE_ORDER_URL || 'https://qle1yy2ydc.execute-api.ap-southeast-1.amazonaws.com/V1/save_order';
-    
-    try {
-      const petpoojaRes = await axios.post(saveOrderUrl, petpoojaPayload);
-      console.log('Petpooja Save Order Response:', petpoojaRes.data);
-    } catch (petpoojaErr) {
-      console.error('Petpooja Save Order Failed:', petpoojaErr.response ? petpoojaErr.response.data : petpoojaErr.message);
-      // Even if relay fails, we saved the order locally. Maybe queue it or log it.
-    }
+    // Relay to Petpooja
+    const petpoojaRes = await relayOrderToPetpooja(newOrder);
 
-    res.status(200).json({ success: true, order: newOrder, message: 'Order created and relayed to Petpooja' });
+    res.status(200).json({ success: true, order: newOrder, petpoojaResponse: petpoojaRes });
   } catch (error) {
     console.error('Order Relay Error:', error);
     res.status(500).json({ success: false, message: error.message });

@@ -409,7 +409,7 @@ router.post('/update-order-status', async (req, res) => {
 });
 
 // CATCH-ALL FOR ANY UNHANDLED PETPOOJA WEBHOOKS
-router.post('(.*)', async (req, res) => {
+router.post('/:path*', async (req, res) => {
   console.log(`⚠️ Unhandled Petpooja Webhook on ${req.path}:`, JSON.stringify(req.body));
   const mongoose = require('mongoose');
   const db = mongoose.connection;

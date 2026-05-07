@@ -401,9 +401,9 @@ router.post('/order-status', async (req, res) => {
         console.log(`📢 Attempting to emit statusUpdate to user: ${order.customerUid}`);
         io.to(order.customerUid).emit('statusUpdate', {
           orderId: order.id,
-          status: order.status,
-          minimumPrepTime: order.minimumPrepTime,
-          minimumDeliveryTime: order.minimumDeliveryTime
+          status: normalizedStatus,
+          minimumPrepTime: payload.minimum_prep_time,
+          minimumDeliveryTime: payload.minimum_delivery_time
         });
         
         // Also update User embedded order
@@ -412,12 +412,12 @@ router.post('/order-status', async (req, res) => {
           { uid: order.customerUid, "orders.id": order.id },
           { 
             $set: { 
-              "orders.$.status": order.status,
-              "orders.$.minimumPrepTime": order.minimumPrepTime,
-              "orders.$.minimumDeliveryTime": order.minimumDeliveryTime
+              "orders.$.status": normalizedStatus,
+              "orders.$.minimumPrepTime": payload.minimum_prep_time,
+              "orders.$.minimumDeliveryTime": payload.minimum_delivery_time
             } 
           },
-          { new: true }
+          { returnDocument: 'after' }
         );
         
         if (userUpdate) {

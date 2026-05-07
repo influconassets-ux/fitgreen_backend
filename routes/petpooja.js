@@ -26,7 +26,15 @@ function normalizePetpoojaStatus(status) {
     ready: "ready",
     dispatched: "dispatched",
     delivered: "delivered",
-    completed: "delivered"
+    completed: "delivered",
+    // Numeric codes
+    "1": "placed",
+    "2": "accepted",
+    "3": "cancelled",
+    "4": "dispatched",
+    "5": "delivered",
+    "6": "ready",
+    "7": "out for delivery"
   };
   return map[value] || value;
 }

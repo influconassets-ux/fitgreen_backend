@@ -23,6 +23,8 @@ const userSchema = new mongoose.Schema({
     total: { type: String },
     address: { type: String },
     status: { type: String },
+    minimumPrepTime: { type: Number },
+    minimumDeliveryTime: { type: Number },
     date: { type: Date, default: Date.now }
   }],
   createdAt: { type: Date, default: Date.now },

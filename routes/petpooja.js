@@ -192,10 +192,10 @@ router.post('/menu', async (req, res) => {
               sortOrder: parseInt(node.itemrank) || 0,
               restaurantId: restId,
               image: node.item_image_url || node.image || '',
-              description: node.itemdescription || node.item_description || node.description || '',
-              itemId: node.itemid // Compatibility
+              description: node.itemdescription || node.item_description || node.description || ''
             });
           }
+
 
           // Check if it's an attribute/variant
           if (node.attributeid && node.attributename) {
@@ -233,12 +233,23 @@ router.post('/menu', async (req, res) => {
 
         // AGGRESSIVE FIX: Clear collection and drop index
         try {
-          await Category.deleteMany({}); // Wipe old categories to prevent reference conflicts during sync
-          await Category.collection.dropIndexes(); // Drop ALL indexes except _id
-          console.log("🧹 Cleaned categories collection and dropped all indexes");
+          await Category.deleteMany({});
+          await Category.collection.dropIndexes();
+          
+          await MenuItem.deleteMany({});
+          await MenuItem.collection.dropIndexes();
+
+          await Addon.deleteMany({});
+          await Addon.collection.dropIndexes();
+
+          await Variant.deleteMany({});
+          await Variant.collection.dropIndexes();
+          
+          console.log("🧹 Cleaned all menu collections and dropped legacy indexes");
         } catch (e) {
           console.error("Index cleanup warning:", e.message);
         }
+
 
         // Save Categories
         const catMap = {};

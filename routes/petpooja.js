@@ -224,81 +224,85 @@ router.post('/menu', async (req, res) => {
           }
         }
 
-        // Run the recursive parser on the entire payload
-        parseNode(payload);
+      // 1. SEND IMMEDIATE RESPONSE TO PETPOOJA (to prevent timeouts)
+      res.status(200).json({ success: "1", message: "Menu received and processing in background" });
 
-        // Track IDs present in this sync to remove missing ones
-        const currentItemIds = extractedItems.map(i => i.petpoojaItemId);
-        const currentCategoryIds = extractedCategories.map(c => c.petpoojaCategoryId);
-
-        // AGGRESSIVE FIX: Clear collection and drop index
+      // 2. PROCESS IN BACKGROUND
+      (async () => {
         try {
-          await Category.deleteMany({});
-          await Category.collection.dropIndexes();
+          console.log("⚡ Starting background menu sync...");
           
-          await MenuItem.deleteMany({});
-          await MenuItem.collection.dropIndexes();
+          // Run the recursive parser on the entire payload
+          parseNode(payload);
 
-          await Addon.deleteMany({});
-          await Addon.collection.dropIndexes();
+          // AGGRESSIVE FIX: Clear collections and drop indexes
+          try {
+            await Category.deleteMany({});
+            await Category.collection.dropIndexes();
+            
+            await MenuItem.deleteMany({});
+            await MenuItem.collection.dropIndexes();
 
-          await Variant.deleteMany({});
-          await Variant.collection.dropIndexes();
-          
-          console.log("🧹 Cleaned all menu collections and dropped legacy indexes");
-        } catch (e) {
-          console.error("Index cleanup warning:", e.message);
+            await Addon.deleteMany({});
+            await Addon.collection.dropIndexes();
+
+            await Variant.deleteMany({});
+            await Variant.collection.dropIndexes();
+            
+            console.log("🧹 Cleaned all menu collections and dropped legacy indexes");
+          } catch (e) {
+            console.error("Index cleanup warning:", e.message);
+          }
+
+          // Save Categories
+          const catMap = {};
+          for (const cat of extractedCategories) {
+            const savedCat = await Category.findOneAndUpdate(
+              { petpoojaCategoryId: cat.petpoojaCategoryId },
+              { $set: cat },
+              { upsert: true, returnDocument: 'after' }
+            );
+            catMap[cat.petpoojaCategoryId] = savedCat._id;
+          }
+
+          // Save Items
+          for (const item of extractedItems) {
+            item.categoryId = catMap[item.petpoojaCategoryId];
+            await MenuItem.findOneAndUpdate(
+              { petpoojaItemId: item.petpoojaItemId },
+              { $set: item },
+              { upsert: true }
+            );
+          }
+
+          // Save Addons
+          const currentAddonIds = extractedAddons.map(a => a.addonId);
+          for (const addon of extractedAddons) {
+            await Addon.findOneAndUpdate(
+              { addonId: addon.addonId },
+              { $set: addon },
+              { upsert: true }
+            );
+          }
+          await Addon.deleteMany({ addonId: { $nin: currentAddonIds } });
+
+          // Save Variants
+          const currentVariantIds = extractedVariants.map(v => v.variantId);
+          for (const variant of extractedVariants) {
+            await Variant.findOneAndUpdate(
+              { variantId: variant.variantId },
+              { $set: variant },
+              { upsert: true }
+            );
+          }
+          await Variant.deleteMany({ variantId: { $nin: currentVariantIds } });
+
+          console.log(`✅ Background Menu Sync Complete: ${extractedItems.length} items processed.`);
+        } catch (backgroundError) {
+          console.error("❌ Background Menu Push Error:", backgroundError);
         }
-
-
-        // Save Categories
-        const catMap = {};
-        for (const cat of extractedCategories) {
-          const savedCat = await Category.findOneAndUpdate(
-            { petpoojaCategoryId: cat.petpoojaCategoryId },
-            { $set: cat },
-            { upsert: true, returnDocument: 'after' }
-          );
-          catMap[cat.petpoojaCategoryId] = savedCat._id;
-        }
-
-        // Remove categories not in this push
-        await Category.deleteMany({ petpoojaCategoryId: { $nin: currentCategoryIds } });
-
-        // Save Items
-        for (const item of extractedItems) {
-          item.categoryId = catMap[item.petpoojaCategoryId];
-          await MenuItem.findOneAndUpdate(
-            { petpoojaItemId: item.petpoojaItemId },
-            { $set: item },
-            { upsert: true }
-          );
-        }
-
-        // Remove items not in this push
-        await MenuItem.deleteMany({ petpoojaItemId: { $nin: currentItemIds } });
-
-        // Save Addons
-        const currentAddonIds = extractedAddons.map(a => a.addonId);
-        for (const addon of extractedAddons) {
-          await Addon.findOneAndUpdate(
-            { addonId: addon.addonId },
-            { $set: addon },
-            { upsert: true }
-          );
-        }
-        await Addon.deleteMany({ addonId: { $nin: currentAddonIds } });
-
-        // Save Variants
-        const currentVariantIds = extractedVariants.map(v => v.variantId);
-        for (const variant of extractedVariants) {
-          await Variant.findOneAndUpdate(
-            { variantId: variant.variantId },
-            { $set: variant },
-            { upsert: true }
-          );
-        }
-        await Variant.deleteMany({ variantId: { $nin: currentVariantIds } });
+      })();
+      return;
 
       }
     } else {

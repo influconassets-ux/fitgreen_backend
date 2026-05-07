@@ -231,6 +231,14 @@ router.post('/menu', async (req, res) => {
         const currentItemIds = extractedItems.map(i => i.petpoojaItemId);
         const currentCategoryIds = extractedCategories.map(c => c.petpoojaCategoryId);
 
+        // FORCE DROP OLD INDEX to prevent E11000 errors on the old field name
+        try {
+          await Category.collection.dropIndex('categoryId_1');
+          console.log("🗑️ Dropped legacy categoryId index");
+        } catch (e) {
+          // Ignore if index doesn't exist
+        }
+
         // Save Categories
         const catMap = {};
         for (const cat of extractedCategories) {

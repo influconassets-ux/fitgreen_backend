@@ -172,12 +172,14 @@ router.post('/menu', async (req, res) => {
           if (node.categoryid && node.categoryname) {
             extractedCategories.push({
               petpoojaCategoryId: node.categoryid,
+              categoryId: node.categoryid, // Compatibility for old unique index
               name: node.categoryname,
               sortOrder: parseInt(node.categoryrank) || 0,
               restaurantId: restId
             });
             currentCatId = node.categoryid;
           }
+
 
           // Check if it's an item
           if (node.itemid && (node.itemname || node.name)) {
@@ -225,45 +227,59 @@ router.post('/menu', async (req, res) => {
         // Run the recursive parser on the entire payload
         parseNode(payload);
 
+        // Track IDs present in this sync to remove missing ones
+        const currentItemIds = extractedItems.map(i => i.petpoojaItemId);
+        const currentCategoryIds = extractedCategories.map(c => c.petpoojaCategoryId);
+
         // Save Categories
         const catMap = {};
         for (const cat of extractedCategories) {
           const savedCat = await Category.findOneAndUpdate(
             { petpoojaCategoryId: cat.petpoojaCategoryId },
-            cat,
-            { upsert: true, new: true }
+            { $set: cat },
+            { upsert: true, returnDocument: 'after' }
           );
           catMap[cat.petpoojaCategoryId] = savedCat._id;
         }
+
+        // Remove categories not in this push
+        await Category.deleteMany({ petpoojaCategoryId: { $nin: currentCategoryIds } });
 
         // Save Items
         for (const item of extractedItems) {
           item.categoryId = catMap[item.petpoojaCategoryId];
           await MenuItem.findOneAndUpdate(
             { petpoojaItemId: item.petpoojaItemId },
-            item,
+            { $set: item },
             { upsert: true }
           );
         }
 
+        // Remove items not in this push
+        await MenuItem.deleteMany({ petpoojaItemId: { $nin: currentItemIds } });
 
         // Save Addons
+        const currentAddonIds = extractedAddons.map(a => a.addonId);
         for (const addon of extractedAddons) {
           await Addon.findOneAndUpdate(
             { addonId: addon.addonId },
-            addon,
+            { $set: addon },
             { upsert: true }
           );
         }
+        await Addon.deleteMany({ addonId: { $nin: currentAddonIds } });
 
         // Save Variants
+        const currentVariantIds = extractedVariants.map(v => v.variantId);
         for (const variant of extractedVariants) {
           await Variant.findOneAndUpdate(
             { variantId: variant.variantId },
-            variant,
+            { $set: variant },
             { upsert: true }
           );
         }
+        await Variant.deleteMany({ variantId: { $nin: currentVariantIds } });
+
       }
     } else {
       // Direct array or different format fallback

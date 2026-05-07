@@ -225,9 +225,31 @@ router.post('/menu', async (req, res) => {
 // 2. ITEM OFF WEBHOOK
 router.post('/item-off', async (req, res) => {
   try {
-    const { itemid, variantid } = req.body; // Petpooja payload typically sends itemid
-    if (itemid) {
-      await MenuItem.findOneAndUpdate({ itemId: itemid }, { available: false });
+    const payload = req.body;
+    console.log('Received Petpooja Item Off Webhook:', JSON.stringify(payload));
+
+    // Save raw payload to DB for debugging
+    const mongoose = require('mongoose');
+    const db = mongoose.connection;
+    await db.collection('webhooklogs').insertOne({ 
+      timestamp: new Date(), 
+      type: 'item_off', 
+      payload: payload 
+    });
+
+    const itemID = payload.itemid || payload.item_id || payload.itemID;
+    
+    if (itemID) {
+      const result = await MenuItem.findOneAndUpdate(
+        { itemId: itemID }, 
+        { available: false },
+        { new: true }
+      );
+      if (result) {
+        console.log(`✅ Item ${itemID} (${result.name}) marked as OUT OF STOCK`);
+      } else {
+        console.warn(`⚠️ Item ${itemID} not found in DB`);
+      }
     }
     res.status(200).json({ success: '1', message: 'Item marked as out of stock' });
   } catch (error) {
@@ -239,9 +261,31 @@ router.post('/item-off', async (req, res) => {
 // 3. ITEM ON WEBHOOK
 router.post('/item-on', async (req, res) => {
   try {
-    const { itemid, variantid } = req.body;
-    if (itemid) {
-      await MenuItem.findOneAndUpdate({ itemId: itemid }, { available: true });
+    const payload = req.body;
+    console.log('Received Petpooja Item On Webhook:', JSON.stringify(payload));
+
+    // Save raw payload to DB for debugging
+    const mongoose = require('mongoose');
+    const db = mongoose.connection;
+    await db.collection('webhooklogs').insertOne({ 
+      timestamp: new Date(), 
+      type: 'item_on', 
+      payload: payload 
+    });
+
+    const itemID = payload.itemid || payload.item_id || payload.itemID;
+    
+    if (itemID) {
+      const result = await MenuItem.findOneAndUpdate(
+        { itemId: itemID }, 
+        { available: true },
+        { new: true }
+      );
+      if (result) {
+        console.log(`✅ Item ${itemID} (${result.name}) marked as AVAILABLE`);
+      } else {
+        console.warn(`⚠️ Item ${itemID} not found in DB`);
+      }
     }
     res.status(200).json({ success: '1', message: 'Item marked as available' });
   } catch (error) {

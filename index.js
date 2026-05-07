@@ -29,6 +29,7 @@ const io = new Server(server, {
 });
 
 app.use(cors());
+app.set('socketio', io);
 
 // Socket.io Connection
 io.on('connection', (socket) => {

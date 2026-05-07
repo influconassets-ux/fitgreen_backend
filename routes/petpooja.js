@@ -272,11 +272,30 @@ router.post('/order-status', async (req, res) => {
     
     if (clientOrderID || orderID) {
       const orderIdToFind = clientOrderID || orderID;
-      await Order.findOneAndUpdate(
+      const order = await Order.findOneAndUpdate(
         { id: orderIdToFind },
         { status: status ? status.toLowerCase() : 'updated' },
         { returnDocument: 'after' }
       );
+
+      if (order && order.customerUid) {
+        // 1. Sync to User's embedded order array
+        const User = require('../models/User');
+        await User.findOneAndUpdate(
+          { uid: order.customerUid, "orders.id": order.id },
+          { $set: { "orders.$.status": order.status } }
+        );
+
+        // 2. Emit Real-time update if io is available
+        const io = req.app.get('socketio');
+        if (io) {
+          io.to(order.customerUid).emit('statusUpdate', {
+            orderId: order.id,
+            status: order.status
+          });
+          console.log(`📢 Emitted Petpooja status update to user: ${order.customerUid}`);
+        }
+      }
     }
     
     res.status(200).json({ success: '1', message: 'Order status updated successfully' });

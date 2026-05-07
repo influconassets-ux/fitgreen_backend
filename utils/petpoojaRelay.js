@@ -3,6 +3,7 @@ const axios = require('axios');
 async function relayOrderToPetpooja(orderData) {
   try {
     console.log(`🚀 Relaying Order ${orderData.id} to Petpooja...`);
+    console.log(`🔗 Callback URL being sent: ${process.env.BASE_URL || 'https://fitgreen-backend.onrender.com'}/api/petpooja/order-status`);
 
     // Prepare Save Order payload for Petpooja
     const petpoojaPayload = {
@@ -57,6 +58,7 @@ async function relayOrderToPetpooja(orderData) {
 
     const saveOrderUrl = process.env.PETPOOJA_SAVE_ORDER_URL || 'https://qle1yy2ydc.execute-api.ap-southeast-1.amazonaws.com/V1/save_order';
     
+    console.log('📡 Sending Payload to Petpooja:', JSON.stringify(petpoojaPayload, null, 2));
     const petpoojaRes = await axios.post(saveOrderUrl, petpoojaPayload);
     console.log('✅ Petpooja Relay Response:', petpoojaRes.data);
     return petpoojaRes.data;

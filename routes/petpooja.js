@@ -409,17 +409,20 @@ router.post('/update-order-status', async (req, res) => {
 });
 
 // CATCH-ALL FOR ANY UNHANDLED PETPOOJA WEBHOOKS
-router.post('/:path*', async (req, res) => {
-  console.log(`⚠️ Unhandled Petpooja Webhook on ${req.path}:`, JSON.stringify(req.body));
-  const mongoose = require('mongoose');
-  const db = mongoose.connection;
-  await db.collection('webhooklogs').insertOne({ 
-    timestamp: new Date(), 
-    type: 'unhandled_webhook', 
-    path: req.path,
-    payload: req.body 
-  });
-  res.status(200).json({ success: '1', message: 'Logged' });
+router.use(async (req, res, next) => {
+  if (req.method === 'POST') {
+    console.log(`⚠️ Unhandled Petpooja Webhook on ${req.path}:`, JSON.stringify(req.body));
+    const mongoose = require('mongoose');
+    const db = mongoose.connection;
+    await db.collection('webhooklogs').insertOne({ 
+      timestamp: new Date(), 
+      type: 'unhandled_webhook', 
+      path: req.path,
+      payload: req.body 
+    });
+    return res.status(200).json({ success: '1', message: 'Logged' });
+  }
+  next();
 });
 
 module.exports = router;

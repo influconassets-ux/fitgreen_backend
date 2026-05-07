@@ -78,6 +78,15 @@ router.post('/menu', async (req, res) => {
   try {
     const payload = req.body;
     console.log('Received Petpooja Menu Push Webhook');
+    
+    // Save raw payload to DB for debugging
+    const mongoose = require('mongoose');
+    const db = mongoose.connection;
+    await db.collection('webhooklogs').insertOne({ 
+      timestamp: new Date(), 
+      type: 'menu_push', 
+      payload: payload 
+    });
 
     // Assuming standard Petpooja payload structure: 
     // payload.restaurants[0] contains details, categories, items, etc.

@@ -59,7 +59,7 @@ router.post('/menu', async (req, res) => {
         await Restaurant.findOneAndUpdate(
           { restaurantId: restId },
           { restaurantId: restId, restaurantName: restName, mappingCode: mappingCode },
-          { upsert: true, new: true }
+          { upsert: true, returnDocument: 'after' }
         );
 
         // Save Categories
@@ -180,7 +180,7 @@ router.post('/order-status', async (req, res) => {
       await Order.findOneAndUpdate(
         { id: orderIdToFind },
         { status: status ? status.toLowerCase() : 'updated' },
-        { new: true }
+        { returnDocument: 'after' }
       );
     }
     
@@ -297,7 +297,7 @@ router.post('/update-order-status', async (req, res) => {
     await Order.findOneAndUpdate(
       { id: orderID },
       { status: 'cancelled' },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     res.status(200).json({ success: true, message: 'Order status updated on Petpooja', response: petpoojaRes.data });

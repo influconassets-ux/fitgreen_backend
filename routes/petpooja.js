@@ -408,7 +408,13 @@ router.post('/order-status', async (req, res) => {
         const User = require('../models/User');
         const userUpdate = await User.findOneAndUpdate(
           { uid: order.customerUid, "orders.id": order.id },
-          { $set: { "orders.$.status": order.status } },
+          { 
+            $set: { 
+              "orders.$.status": order.status,
+              "orders.$.minimumPrepTime": order.minimumPrepTime,
+              "orders.$.minimumDeliveryTime": order.minimumDeliveryTime
+            } 
+          },
           { new: true }
         );
         

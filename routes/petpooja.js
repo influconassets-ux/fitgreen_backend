@@ -137,105 +137,103 @@ router.post('/menu', async (req, res) => {
       payload: payload 
     });
 
-    // Assuming standard Petpooja payload structure: 
-    // payload.restaurants[0] contains details, categories, items, etc.
     if (payload && payload.restaurants && payload.restaurants.length > 0) {
-      for (const restData of payload.restaurants) {
-        const details = restData.details || {};
-        const restId = details.restaurantid || 'default_rest_id';
-        const restName = details.restaurantname || 'FitGreen';
-        const mappingCode = 'f871uxkp'; // As per plan instructions
-
-        // Save Restaurant
-        await Restaurant.findOneAndUpdate(
-          { restaurantId: restId },
-          { restaurantId: restId, restaurantName: restName, mappingCode: mappingCode },
-          { upsert: true, returnDocument: 'after' }
-        );
-
-        // Robust Extraction Function for deep nesting
-        const extractedCategories = [];
-        const extractedItems = [];
-        const extractedVariants = [];
-        const extractedAddons = [];
-
-        function parseNode(node, currentCatId = null) {
-          if (!node || typeof node !== 'object') return;
-
-          // If it's an array, iterate
-          if (Array.isArray(node)) {
-            node.forEach(child => parseNode(child, currentCatId));
-            return;
-          }
-
-          // Check if it's a category
-          if (node.categoryid && node.categoryname) {
-            extractedCategories.push({
-              petpoojaCategoryId: node.categoryid,
-              name: node.categoryname,
-              sortOrder: parseInt(node.categoryrank) || 0,
-              restaurantId: restId
-            });
-            currentCatId = node.categoryid;
-          }
-
-
-
-          // Check if it's an item
-          if (node.itemid && (node.itemname || node.name)) {
-            extractedItems.push({
-              petpoojaItemId: node.itemid,
-              name: node.itemname || node.name,
-              price: parseFloat(node.item_price) || parseFloat(node.price) || 0,
-              petpoojaCategoryId: node.item_categoryid || node.categoryid || currentCatId || 'default',
-              available: node.active === "1" || node.in_stock === "1" || node.in_stock === "2" || node.available === true,
-              sortOrder: parseInt(node.itemrank) || 0,
-              restaurantId: restId,
-              image: node.item_image_url || node.image || '',
-              description: node.itemdescription || node.item_description || node.description || ''
-            });
-          }
-
-
-          // Check if it's an attribute/variant
-          if (node.attributeid && node.attributename) {
-            if (node.attribute_type === 'addon') {
-              extractedAddons.push({
-                addonId: node.attributeid,
-                itemId: node.itemid || 'unknown',
-                name: node.attributename,
-                price: parseFloat(node.price) || 0
-              });
-            } else {
-              extractedVariants.push({
-                variantId: node.attributeid,
-                itemId: node.itemid || 'unknown',
-                name: node.attributename,
-                price: parseFloat(node.price) || 0
-              });
-            }
-          }
-
-          // Recursively traverse all keys
-          for (const key of Object.keys(node)) {
-            if (typeof node[key] === 'object' && node[key] !== null) {
-              parseNode(node[key], currentCatId);
-            }
-          }
-        }
-
-      // 1. SEND IMMEDIATE RESPONSE TO PETPOOJA (to prevent timeouts)
-      res.status(200).json({ success: "1", message: "Menu received and processing in background" });
+      const restId = payload.restaurants[0].restaurantid || 'default';
+      
+      // 1. SEND IMMEDIATE SUCCESS RESPONSE TO PETPOOJA (to prevent timeouts and dashboard errors)
+      // Petpooja often expects "success": "1" and exactly "Menu items are successfully listed."
+      res.status(200).json({ 
+        success: "1", 
+        message: "Menu items are successfully listed.",
+        restid: restId
+      });
 
       // 2. PROCESS IN BACKGROUND
       (async () => {
+
         try {
           console.log("⚡ Starting background menu sync...");
           
+          const extractedCategories = [];
+          const extractedItems = [];
+          const extractedVariants = [];
+          const extractedAddons = [];
+
+          // Robust Extraction Function for deep nesting
+          function parseNode(node, currentCatId = null) {
+            if (!node || typeof node !== 'object') return;
+
+            if (Array.isArray(node)) {
+              node.forEach(child => parseNode(child, currentCatId));
+              return;
+            }
+
+            if (node.categoryid && node.categoryname) {
+              extractedCategories.push({
+                petpoojaCategoryId: node.categoryid,
+                name: node.categoryname,
+                sortOrder: parseInt(node.categoryrank) || 0,
+                restaurantId: payload.restaurants[0].restaurantid || 'default'
+              });
+              currentCatId = node.categoryid;
+            }
+
+            if (node.itemid && (node.itemname || node.name)) {
+              extractedItems.push({
+                petpoojaItemId: node.itemid,
+                name: node.itemname || node.name,
+                price: parseFloat(node.item_price) || parseFloat(node.price) || 0,
+                petpoojaCategoryId: node.item_categoryid || node.categoryid || currentCatId || 'default',
+                available: node.active === "1" || node.in_stock === "1" || node.in_stock === "2" || node.available === true,
+                sortOrder: parseInt(node.itemrank) || 0,
+                restaurantId: payload.restaurants[0].restaurantid || 'default',
+                image: node.item_image_url || node.image || '',
+                description: node.itemdescription || node.item_description || node.description || ''
+              });
+            }
+
+            if (node.attributeid && node.attributename) {
+              if (node.attribute_type === 'addon') {
+                extractedAddons.push({
+                  addonId: node.attributeid,
+                  itemId: node.itemid || 'unknown',
+                  name: node.attributename,
+                  price: parseFloat(node.price) || 0
+                });
+              } else {
+                extractedVariants.push({
+                  variantId: node.attributeid,
+                  itemId: node.itemid || 'unknown',
+                  name: node.attributename,
+                  price: parseFloat(node.price) || 0
+                });
+              }
+            }
+
+            for (const key of Object.keys(node)) {
+              if (typeof node[key] === 'object' && node[key] !== null) {
+                parseNode(node[key], currentCatId);
+              }
+            }
+          }
+
           // Run the recursive parser on the entire payload
           parseNode(payload);
 
-          // AGGRESSIVE FIX: Clear collections and drop indexes
+          // Save Restaurant Info from the first restaurant in payload
+          const firstRest = payload.restaurants[0];
+          const details = firstRest.details || {};
+          await Restaurant.findOneAndUpdate(
+            { restaurantId: firstRest.restaurantid },
+            { 
+              restaurantId: firstRest.restaurantid, 
+              restaurantName: details.restaurantname || 'FitGreen', 
+              mappingCode: details.menusharingcode || 'f871uxkp' 
+            },
+            { upsert: true }
+          );
+
+          // AGGRESSIVE FIX: Clear collections and drop indexes to prevent duplicate key errors
           try {
             await Category.deleteMany({});
             await Category.collection.dropIndexes();
@@ -260,7 +258,7 @@ router.post('/menu', async (req, res) => {
             const savedCat = await Category.findOneAndUpdate(
               { petpoojaCategoryId: cat.petpoojaCategoryId },
               { $set: cat },
-              { upsert: true, returnDocument: 'after' }
+              { upsert: true, new: true }
             );
             catMap[cat.petpoojaCategoryId] = savedCat._id;
           }
@@ -302,20 +300,18 @@ router.post('/menu', async (req, res) => {
           console.error("❌ Background Menu Push Error:", backgroundError);
         }
       })();
-      return;
-
-      }
     } else {
-      // Direct array or different format fallback
-      console.log('Unknown payload format, logging for review', JSON.stringify(payload).substring(0, 200));
+      console.log('No restaurants found in payload, returning success to acknowledge.');
+      res.status(200).json({ success: "1", message: "Menu items are successfully listed." });
     }
-
-    res.status(200).json({ success: '1', message: 'Menu synced successfully' });
   } catch (error) {
     console.error('Menu Push Error:', error);
-    res.status(500).json({ success: '0', message: error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ success: "0", message: error.message });
+    }
   }
 });
+
 
 // 2. ITEM OFF WEBHOOK
 router.post('/item-off', async (req, res) => {

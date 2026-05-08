@@ -467,7 +467,8 @@ router.post('/order-status', async (req, res) => {
           orderId: order.id,
           status: normalizedStatus,
           minimumPrepTime: payload.minimum_prep_time,
-          minimumDeliveryTime: payload.minimum_delivery_time
+          minimumDeliveryTime: payload.minimum_delivery_time,
+          lastStatusUpdatedAt: order.lastStatusUpdatedAt || new Date()
         });
         
         // Also update User embedded order
@@ -478,7 +479,8 @@ router.post('/order-status', async (req, res) => {
             $set: { 
               "orders.$.status": normalizedStatus,
               "orders.$.minimumPrepTime": payload.minimum_prep_time,
-              "orders.$.minimumDeliveryTime": payload.minimum_delivery_time
+              "orders.$.minimumDeliveryTime": payload.minimum_delivery_time,
+              "orders.$.lastStatusUpdatedAt": order.lastStatusUpdatedAt || new Date()
             } 
           },
           { returnDocument: 'after' }

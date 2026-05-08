@@ -25,6 +25,8 @@ const orderSchema = new mongoose.Schema({
   razorpayPaymentId: { type: String },
   minimumPrepTime: { type: Number },
   minimumDeliveryTime: { type: Number },
+  lastStatusUpdatedAt: { type: Date },
+  petpoojaCallbackRaw: { type: Object },
   date: { type: Date, default: Date.now }
 }, { timestamps: true });
 

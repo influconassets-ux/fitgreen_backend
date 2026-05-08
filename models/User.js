@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema({
     status: { type: String },
     minimumPrepTime: { type: Number },
     minimumDeliveryTime: { type: Number },
+    lastStatusUpdatedAt: { type: Date },
     date: { type: Date, default: Date.now }
   }],
   createdAt: { type: Date, default: Date.now },

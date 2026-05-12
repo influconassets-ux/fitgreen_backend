@@ -42,7 +42,9 @@ io.on('connection', (socket) => {
 
   socket.on('admin-join', () => {
     socket.join('admin-room');
-    console.log(`🔑 Admin joined admin-room`);
+    console.log(`🔑 Admin joined admin-room (Socket ID: ${socket.id})`);
+    // Send a confirmation back to admin
+    socket.emit('admin-join-success');
   });
 
   socket.on('disconnect', () => {
@@ -101,20 +103,79 @@ app.get('/api/menu', async (req, res) => {
     const categories = await Category.find().sort({ sortOrder: 1 });
     const items = await MenuItem.find({ available: true }).sort({ sortOrder: 1 });
     
-    const menu = categories.map(cat => {
-      const catItems = items.filter(item => item.petpoojaCategoryId === cat.petpoojaCategoryId);
-      return {
-        categoryName: cat.name,
-        items: catItems.map(item => ({
+    let menu = [];
+
+    if (categories.length > 0) {
+      menu = categories.map(cat => {
+        const catItems = items.filter(item => item.petpoojaCategoryId === cat.petpoojaCategoryId);
+        return {
+          categoryName: cat.name,
+          items: catItems.map(item => ({
+            name: item.name,
+            price: item.price,
+            petpoojaItemId: item.petpoojaItemId,
+            image: item.image,
+            description: item.description,
+            available: item.available,
+            kcal: item.kcal,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+            sugar: item.sugar,
+            isMostLoved: item.isMostLoved,
+            isSeasonal: item.isSeasonal,
+            isSmoothie: item.isSmoothie
+          }))
+        };
+      }).filter(cat => cat.items.length > 0);
+
+      // Add items that don't belong to any found category
+      const categorizedItemIds = new Set(menu.flatMap(c => c.items.map(i => i.petpoojaItemId)));
+      const uncategorizedItems = items.filter(i => !categorizedItemIds.has(i.petpoojaItemId));
+      
+      if (uncategorizedItems.length > 0) {
+        menu.push({
+          categoryName: "Other Items",
+          items: uncategorizedItems.map(item => ({
+            name: item.name,
+            price: item.price,
+            petpoojaItemId: item.petpoojaItemId,
+            image: item.image,
+            description: item.description,
+            available: item.available,
+            kcal: item.kcal,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+            sugar: item.sugar,
+            isMostLoved: item.isMostLoved,
+            isSeasonal: item.isSeasonal,
+            isSmoothie: item.isSmoothie
+          }))
+        });
+      }
+    } else {
+      // No categories at all - just return everything as "Menu"
+      menu = [{
+        categoryName: "Menu",
+        items: items.map(item => ({
           name: item.name,
           price: item.price,
           petpoojaItemId: item.petpoojaItemId,
           image: item.image,
           description: item.description,
-          available: item.available
+          available: item.available,
+          kcal: item.kcal,
+          protein: item.protein,
+          carbs: item.carbs,
+          fat: item.fat,
+          sugar: item.sugar,
+          isMostLoved: item.isMostLoved,
+          isSeasonal: item.isSeasonal,
+          isSmoothie: item.isSmoothie
         }))
-      };
-    }).filter(cat => cat.items.length > 0);
+      }];
+    }
     
     res.status(200).json(menu);
   } catch (err) {
@@ -346,9 +407,6 @@ app.post('/place-order', async (req, res) => {
     );
 
     res.status(200).json({ success: true, order: newOrder });
-
-    // EMIT TO ADMINS - REMOVED (Only notify on payment success)
-    // io.to('admin-room').emit('newOrder', newOrder);
     console.log(`📝 Order created in pending state: ${newOrder.id}`);
   } catch (error) {
     console.error('Failed to save order:', error);
@@ -426,7 +484,12 @@ app.post('/api/razorpay/webhook', async (req, res) => {
           }
 
           // Emit real-time update to user and admin
-          io.to('admin-room').emit('newOrder', order); // Notify admin of payment success
+          const plainOrder = order.toObject();
+          io.to('admin-room').emit('newOrder', plainOrder); // Notify admin of payment success
+          io.emit('newOrder', plainOrder); // Fallback: Emit to everyone for reliability
+          
+          console.log(`🔥 Emitted newOrder event for ${order.id} to admin-room`);
+
           if (order.customerUid) {
             io.to(order.customerUid).emit('statusUpdate', {
               orderId: order.id,
@@ -524,6 +587,16 @@ app.get('/api/orders', async (req, res) => {
     const orders = await Order.find({ status: { $ne: 'pending' } })
       .sort({ date: -1 });
     res.status(200).json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/orders/all', async (req, res) => {
+  try {
+    await Order.deleteMany({});
+    await User.updateMany({}, { $set: { orders: [] } });
+    res.status(200).json({ success: true, message: 'All orders deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

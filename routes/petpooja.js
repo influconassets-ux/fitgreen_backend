@@ -49,20 +49,78 @@ router.get('/menu', async (req, res) => {
     const categories = await Category.find().sort({ sortOrder: 1 });
     const items = await MenuItem.find({ available: true }).sort({ sortOrder: 1 });
     
-    const menu = categories.map(cat => {
-      const catItems = items.filter(item => item.petpoojaCategoryId === cat.petpoojaCategoryId);
-      return {
-        categoryName: cat.name,
-        items: catItems.map(item => ({
+    let menu = [];
+
+    if (categories.length > 0) {
+      menu = categories.map(cat => {
+        const catItems = items.filter(item => item.petpoojaCategoryId === cat.petpoojaCategoryId);
+        return {
+          categoryName: cat.name,
+          items: catItems.map(item => ({
+            name: item.name,
+            price: item.price,
+            petpoojaItemId: item.petpoojaItemId,
+            image: item.image,
+            description: item.description,
+            available: item.available,
+            kcal: item.kcal,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+            sugar: item.sugar,
+            isMostLoved: item.isMostLoved,
+            isSeasonal: item.isSeasonal,
+            isSmoothie: item.isSmoothie
+          }))
+        };
+      }).filter(cat => cat.items.length > 0);
+
+      // Add items that don't belong to any found category
+      const categorizedItemIds = new Set(menu.flatMap(c => c.items.map(i => i.petpoojaItemId)));
+      const uncategorizedItems = items.filter(i => !categorizedItemIds.has(i.petpoojaItemId));
+      
+      if (uncategorizedItems.length > 0) {
+        menu.push({
+          categoryName: "Other Items",
+          items: uncategorizedItems.map(item => ({
+            name: item.name,
+            price: item.price,
+            petpoojaItemId: item.petpoojaItemId,
+            image: item.image,
+            description: item.description,
+            available: item.available,
+            kcal: item.kcal,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+            sugar: item.sugar,
+            isMostLoved: item.isMostLoved,
+            isSeasonal: item.isSeasonal,
+            isSmoothie: item.isSmoothie
+          }))
+        });
+      }
+    } else {
+      menu = [{
+        categoryName: "All Items",
+        items: items.map(item => ({
           name: item.name,
           price: item.price,
           petpoojaItemId: item.petpoojaItemId,
           image: item.image,
           description: item.description,
-          available: item.available
+          available: item.available,
+          kcal: item.kcal,
+          protein: item.protein,
+          carbs: item.carbs,
+          fat: item.fat,
+          sugar: item.sugar,
+          isMostLoved: item.isMostLoved,
+          isSeasonal: item.isSeasonal,
+          isSmoothie: item.isSmoothie
         }))
-      };
-    }).filter(cat => cat.items.length > 0);
+      }];
+    }
     
     res.status(200).json(menu);
   } catch (err) {
@@ -90,24 +148,93 @@ router.get('/items-all', async (req, res) => {
   }
 });
 
-// Admin Panel Update Item (Custom properties like macros, images)
+// Admin Panel Update/Create Item (Manual or Petpooja)
+router.post('/items', async (req, res) => {
+  try {
+    const itemData = req.body;
+    
+    // Cloudinary upload
+    const cloudinary = require('cloudinary').v2;
+    if (itemData.image && itemData.image.startsWith('data:image')) {
+      const uploadRes = await cloudinary.uploader.upload(itemData.image, { folder: 'fitgreen_products' });
+      itemData.image = uploadRes.secure_url;
+    }
+
+    // Generate a pseudo-ID if missing (for manual items)
+    if (!itemData.petpoojaItemId) {
+      itemData.petpoojaItemId = 'manual_' + Date.now();
+    }
+    if (!itemData.itemId) {
+      itemData.itemId = itemData.petpoojaItemId;
+    }
+
+    const item = new MenuItem(itemData);
+    await item.save();
+    
+    // Notify frontend
+    const io = req.app.get('socketio');
+    if (io) io.emit('menu-updated');
+
+    res.status(201).json({ success: true, item });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.put('/items/:id', async (req, res) => {
   try {
     const updateData = req.body;
-    
-    // Cloudinary upload if an image was updated (using similar logic as Product.js)
     const cloudinary = require('cloudinary').v2;
     if (updateData.image && updateData.image.startsWith('data:image')) {
       const uploadRes = await cloudinary.uploader.upload(updateData.image, { folder: 'fitgreen_products' });
       updateData.image = uploadRes.secure_url;
     }
 
+    // Try finding by itemId or petpoojaItemId
     const item = await MenuItem.findOneAndUpdate(
-      { itemId: req.params.id },
+      { $or: [{ itemId: req.params.id }, { petpoojaItemId: req.params.id }] },
       { $set: updateData },
       { returnDocument: 'after' }
     );
+    
+    // Notify frontend
+    const io = req.app.get('socketio');
+    if (io) io.emit('menu-updated');
+
     res.status(200).json({ success: true, item });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/items/:id', async (req, res) => {
+  try {
+    await MenuItem.findOneAndDelete({ $or: [{ itemId: req.params.id }, { petpoojaItemId: req.params.id }] });
+    
+    // Notify frontend
+    const io = req.app.get('socketio');
+    if (io) io.emit('menu-updated');
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/categories', async (req, res) => {
+  try {
+    const catData = req.body;
+    if (!catData.petpoojaCategoryId) {
+      catData.petpoojaCategoryId = 'cat_manual_' + Date.now();
+    }
+    const category = new Category(catData);
+    await category.save();
+
+    // Notify frontend
+    const io = req.app.get('socketio');
+    if (io) io.emit('menu-updated');
+
+    res.status(201).json({ success: true, category });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -122,11 +249,41 @@ router.get('/items', async (req, res) => {
   }
 });
 
+// Clear Full Menu (Admin)
+router.delete('/menu-all', async (req, res) => {
+  try {
+    await Category.deleteMany({});
+    await MenuItem.deleteMany({});
+    await Variant.deleteMany({});
+    await Addon.deleteMany({});
+    
+    // Notify all clients to refresh menu
+    const io = req.app.get('socketio');
+    if (io) {
+      io.emit('menu-updated');
+    }
+
+    res.status(200).json({ success: true, message: 'Full menu deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 1. MENU PUSH WEBHOOK
 router.post('/menu', async (req, res) => {
   try {
     const payload = req.body;
     console.log('Received Petpooja Menu Push Webhook');
+
+    // 0. CHECK IF SYNC IS DISABLED
+    if (process.env.DISABLE_PETPOOJA_SYNC === 'true') {
+      console.log('⚠️ Petpooja Menu Sync is DISABLED. Ignoring webhook.');
+      return res.status(200).json({ 
+        success: "1", 
+        message: "Menu items received but sync is disabled.",
+        restid: payload.restaurants?.[0]?.restaurantid || 'default'
+      });
+    }
     
     // Save raw payload to DB for debugging
     const mongoose = require('mongoose');

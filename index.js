@@ -34,7 +34,7 @@ app.set('socketio', io);
 // Socket.io Connection
 io.on('connection', (socket) => {
   console.log('🔌 A user connected via Socket.io');
-  
+
   socket.on('join', (uid) => {
     socket.join(uid);
     console.log(`👤 User joined room: ${uid}`);
@@ -102,7 +102,7 @@ app.get('/api/menu', async (req, res) => {
   try {
     const categories = await Category.find().sort({ sortOrder: 1 });
     const items = await MenuItem.find({ available: true }).sort({ sortOrder: 1 });
-    
+
     let menu = [];
 
     if (categories.length > 0) {
@@ -132,7 +132,7 @@ app.get('/api/menu', async (req, res) => {
       // Add items that don't belong to any found category
       const categorizedItemIds = new Set(menu.flatMap(c => c.items.map(i => i.petpoojaItemId)));
       const uncategorizedItems = items.filter(i => !categorizedItemIds.has(i.petpoojaItemId));
-      
+
       if (uncategorizedItems.length > 0) {
         menu.push({
           categoryName: "Other Items",
@@ -176,7 +176,7 @@ app.get('/api/menu', async (req, res) => {
         }))
       }];
     }
-    
+
     res.status(200).json(menu);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -226,7 +226,7 @@ app.post('/api/validate-coupon', async (req, res) => {
   try {
     const { code, cartTotal } = req.body;
     const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true });
-    
+
     if (!coupon) {
       return res.status(404).json({ success: false, message: 'Invalid or expired coupon' });
     }
@@ -235,10 +235,10 @@ app.post('/api/validate-coupon', async (req, res) => {
       return res.status(400).json({ success: false, message: `Minimum order of ₹${coupon.minOrder} required` });
     }
 
-    res.status(200).json({ 
-      success: true, 
-      discountType: coupon.discountType, 
-      discountValue: coupon.discountValue 
+    res.status(200).json({
+      success: true,
+      discountType: coupon.discountType,
+      discountValue: coupon.discountValue
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -265,7 +265,7 @@ app.post('/api/tip', async (req, res) => {
   try {
     const { text } = req.body;
     const tip = await Tip.findOneAndUpdate(
-      {}, 
+      {},
       { text, updatedAt: new Date() },
       { upsert: true, new: true }
     );
@@ -349,7 +349,7 @@ app.post('/verify-token', async (req, res) => {
     if (profileData?.address) updateData.address = profileData?.address;
     if (profileData?.pinCode) updateData.pinCode = profileData?.pinCode;
     if (profileData?.city) updateData.city = profileData?.city;
-    
+
     if (profileData?.photo) {
       if (profileData.photo.startsWith('data:image')) {
         try {
@@ -455,18 +455,18 @@ app.post('/api/razorpay/webhook', async (req, res) => {
         // Find the order by razorpayOrderId and update status
         const order = await Order.findOneAndUpdate(
           { razorpayOrderId: razorpayOrderId },
-          { 
-            $set: { 
-              status: 'paid', 
-              razorpayPaymentId: razorpayPaymentId 
-            } 
+          {
+            $set: {
+              status: 'paid',
+              razorpayPaymentId: razorpayPaymentId
+            }
           },
           { new: true }
         );
 
         if (order) {
           console.log(`✅ Order ${order.id} marked as paid via webhook`);
-          
+
           // --- TRIGGER PETPOOJA RELAY ---
           try {
             await relayOrderToPetpooja(order);
@@ -474,7 +474,7 @@ app.post('/api/razorpay/webhook', async (req, res) => {
             console.error(`Failed to relay order ${order.id} to Petpooja:`, relayErr.message);
           }
           // ------------------------------
-          
+
           // Also update embedded order in User model
           if (order.customerUid) {
             await User.findOneAndUpdate(
@@ -487,7 +487,7 @@ app.post('/api/razorpay/webhook', async (req, res) => {
           const plainOrder = order.toObject();
           io.to('admin-room').emit('newOrder', plainOrder); // Notify admin of payment success
           io.emit('newOrder', plainOrder); // Fallback: Emit to everyone for reliability
-          
+
           console.log(`🔥 Emitted newOrder event for ${order.id} to admin-room`);
 
           if (order.customerUid) {
@@ -559,7 +559,7 @@ app.get('/api/stats', async (req, res) => {
       d.setDate(now.getDate() - i);
       const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
       const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
-      
+
       const count = await Visit.countDocuments({ timestamp: { $gte: start, $lte: end } });
       graphData.push({
         name: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
@@ -568,7 +568,7 @@ app.get('/api/stats', async (req, res) => {
     }
 
     const recentOrders = await Order.find({ status: { $ne: 'pending' } }).sort({ date: -1 }).limit(10);
-    
+
     res.status(200).json({
       dailyVisits,
       monthlyVisits,
@@ -611,7 +611,7 @@ app.patch('/api/orders/:id/status', async (req, res) => {
 
     // Try to find by custom 'id' field OR MongoDB '_id'
     let query = { $or: [{ id: id }] };
-    
+
     // If 'id' looks like a MongoDB ObjectId, add it to the $or query
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
       query.$or.push({ _id: id });
@@ -638,7 +638,7 @@ app.patch('/api/orders/:id/status', async (req, res) => {
     }
 
     console.log(`Successfully updated order ${order.id} status to: ${order.status}`);
-    
+
     // EMIT REAL-TIME UPDATE VIA SOCKET.IO
     if (order.customerUid) {
       io.to(order.customerUid).emit('statusUpdate', {
@@ -771,6 +771,12 @@ app.post('/api/corporate-login', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- KEEP ALIVE ROUTE ---
+// Ping this URL every 14 minutes to prevent Render from sleeping
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong');
 });
 
 const PORT = process.env.PORT || 5000;

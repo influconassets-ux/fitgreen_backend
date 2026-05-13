@@ -16,6 +16,8 @@ const orderSchema = new mongoose.Schema({
     isCustom: { type: Boolean }
   }],
   total: { type: String },
+  deliveryCharge: { type: Number, default: 0 },
+  deliveryMethod: { type: String, default: 'delivery' }, // 'delivery' or 'pickup'
   address: { type: String },
   city: { type: String },
   pinCode: { type: String },

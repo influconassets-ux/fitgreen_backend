@@ -20,6 +20,20 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 const app = express();
 const http = require('http');
 const server = http.createServer(app);
+const rateLimit = require('express-rate-limit');
+
+// 0. BOT PROTECTION: Rate limiting to prevent brute force and scraping
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  standardHeaders: true, 
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this IP, please try again after 15 minutes.' }
+});
+
+// Apply rate limiter to all API routes
+app.use('/api/', limiter);
+
 const { Server } = require('socket.io');
 const io = new Server(server, {
   cors: {

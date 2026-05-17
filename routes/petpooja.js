@@ -156,7 +156,12 @@ router.post('/items', async (req, res) => {
     // Cloudinary upload
     const cloudinary = require('cloudinary').v2;
     if (itemData.image && itemData.image.startsWith('data:image')) {
-      const uploadRes = await cloudinary.uploader.upload(itemData.image, { folder: 'fitgreen_products' });
+      const uploadRes = await cloudinary.uploader.upload(itemData.image, { 
+        folder: 'fitgreen_products',
+        format: 'webp',
+        quality: 'auto',
+        transformation: [{ width: 800, crop: 'limit' }]
+      });
       itemData.image = uploadRes.secure_url;
     }
 
@@ -186,7 +191,12 @@ router.put('/items/:id', async (req, res) => {
     const updateData = req.body;
     const cloudinary = require('cloudinary').v2;
     if (updateData.image && updateData.image.startsWith('data:image')) {
-      const uploadRes = await cloudinary.uploader.upload(updateData.image, { folder: 'fitgreen_products' });
+      const uploadRes = await cloudinary.uploader.upload(updateData.image, { 
+        folder: 'fitgreen_products',
+        format: 'webp',
+        quality: 'auto',
+        transformation: [{ width: 800, crop: 'limit' }]
+      });
       updateData.image = uploadRes.secure_url;
     }
 

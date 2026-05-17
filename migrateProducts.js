@@ -30,7 +30,12 @@ async function migrateImages() {
       if (product.img && product.img.startsWith('data:image')) {
         console.log(`Uploading image for product: ${product.name}...`);
         try {
-          const uploadRes = await cloudinary.uploader.upload(product.img, { folder: 'fitgreen_products' });
+          const uploadRes = await cloudinary.uploader.upload(product.img, { 
+            folder: 'fitgreen_products',
+            format: 'webp',
+            quality: 'auto',
+            transformation: [{ width: 800, crop: 'limit' }]
+          });
           product.img = uploadRes.secure_url;
           await product.save();
           console.log(`✅ Migrated: ${product.name} -> ${uploadRes.secure_url}`);

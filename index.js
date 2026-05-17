@@ -43,6 +43,7 @@ const io = new Server(server, {
 });
 
 app.use(cors());
+app.use(require('compression')()); // Compresses JSON payloads
 app.set('socketio', io);
 
 // Socket.io Connection
@@ -313,7 +314,12 @@ app.post('/api/products', async (req, res) => {
   try {
     if (productData.img && productData.img.startsWith('data:image')) {
       console.log('Uploading product image to Cloudinary...');
-      const uploadRes = await cloudinary.uploader.upload(productData.img, { folder: 'fitgreen_products' });
+      const uploadRes = await cloudinary.uploader.upload(productData.img, { 
+        folder: 'fitgreen_products',
+        format: 'webp',
+        quality: 'auto',
+        transformation: [{ width: 800, crop: 'limit' }]
+      });
       productData.img = uploadRes.secure_url;
       console.log('Upload complete:', productData.img);
     }
@@ -367,7 +373,12 @@ app.post('/verify-token', async (req, res) => {
     if (profileData?.photo) {
       if (profileData.photo.startsWith('data:image')) {
         try {
-          const uploadRes = await cloudinary.uploader.upload(profileData.photo, { folder: 'fitgreen_profiles' });
+          const uploadRes = await cloudinary.uploader.upload(profileData.photo, { 
+            folder: 'fitgreen_profiles',
+            format: 'webp',
+            quality: 'auto',
+            transformation: [{ width: 400, crop: 'limit' }] // profiles can be smaller
+          });
           updateData.photo = uploadRes.secure_url;
         } catch (err) {
           console.error('Failed to upload profile photo to Cloudinary:', err.message);

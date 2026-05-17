@@ -290,6 +290,41 @@ app.post('/api/tip', async (req, res) => {
   }
 });
 
+// --- SETTINGS / STORE STATUS ROUTES ---
+const Settings = require('./models/Settings');
+
+// 1. Get Store Status
+app.get('/api/settings/store-status', async (req, res) => {
+  try {
+    let settings = await Settings.findOne();
+    if (!settings) {
+      settings = await Settings.create({ isStoreOpen: true, openingTime: "6:00 AM" });
+    }
+    res.status(200).json(settings);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Update Store Status (Admin)
+app.post('/api/settings/store-status', async (req, res) => {
+  try {
+    const { isStoreOpen, openingTime } = req.body;
+    const settings = await Settings.findOneAndUpdate(
+      {},
+      { isStoreOpen, openingTime },
+      { upsert: true, new: true }
+    );
+    
+    // Notify all connected clients via Socket.io
+    io.emit('store-status-changed', settings);
+    
+    res.status(200).json({ success: true, settings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fitgreen';
 mongoose.connect(MONGODB_URI, { dbName: 'fitgreen' })

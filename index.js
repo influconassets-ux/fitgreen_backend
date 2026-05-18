@@ -454,9 +454,9 @@ app.post('/place-order', async (req, res) => {
       customerName: user?.name || 'Customer',
       customerEmail: user?.email || '',
       address: orderData.address || user?.address || 'N/A',
-      city: user?.city || '',
-      pinCode: user?.pinCode || '',
-      phone: user?.phone || '',
+      city: orderData.city || user?.city || '',
+      pinCode: orderData.pinCode || user?.pinCode || '',
+      phone: orderData.phone || user?.phone || '',
     });
     await newOrder.save();
 

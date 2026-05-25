@@ -1,23 +1,16 @@
 require('dotenv').config();
-const mongoose = require('mongoose');
 const dns = require('node:dns');
 dns.setServers(['8.8.8.8', '1.1.1.1']);
+const mongoose = require('mongoose');
+const RequestLog = require('./models/RequestLog');
 
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fitgreen';
 
-async function checkLogs() {
-    try {
-        await mongoose.connect(process.env.MONGODB_URI, { dbName: 'fitgreen' });
-        const db = mongoose.connection;
-        
-        console.log("Checking petpooja_callback_logs...");
-        const logs = await db.collection('petpooja_callback_logs').find({}).sort({ receivedAt: -1 }).limit(5).toArray();
-        console.log(JSON.stringify(logs, null, 2));
-        
-        process.exit(0);
-    } catch (err) {
-        console.error(err);
-        process.exit(1);
-    }
-}
-
-checkLogs();
+mongoose.connect(MONGODB_URI, { dbName: 'fitgreen' }).then(async () => {
+  const recentLogs = await RequestLog.find().sort({ createdAt: -1 }).limit(15);
+  console.log("15 Most Recent Requests:");
+  recentLogs.forEach(log => {
+      console.log(`[${log.createdAt.toISOString()}] IP: ${log.ip} | Method: ${log.method} | URL: ${log.url} | UA: ${log.userAgent}`);
+  });
+  process.exit(0);
+});

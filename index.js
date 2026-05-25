@@ -593,6 +593,70 @@ app.post('/api/track-visit', async (req, res) => {
   }
 });
 
+// --- OPTIMIZED STARTUP INITIALIZATION ---
+// This endpoint combines store-status, tip, menu, and track-visit into one request to save 75% of bandwidth and DB hits.
+app.get('/api/init', async (req, res) => {
+  try {
+    // 1. Log the visit
+    const newVisit = new Visit();
+    await newVisit.save().catch(err => console.error("Error logging visit in /init:", err));
+
+    // 2. Fetch Store Status
+    const SettingsModel = require('./models/Settings');
+    let settings = await SettingsModel.findOne();
+    if (!settings) {
+      settings = { isStoreOpen: true, openingTime: "6:00 AM" };
+    }
+
+    // 3. Fetch Tip
+    const TipModel = require('./models/Tip');
+    let tip = await TipModel.findOne().sort({ updatedAt: -1 });
+    if (!tip) {
+      tip = { text: 'Start your meal with protein to stay fuller for longer and maintain steady energy throughout the day.' };
+    }
+
+    // 4. Fetch Menu
+    const CategoryModel = require('./models/Category');
+    const MenuItemModel = require('./models/MenuItem');
+    const categories = await CategoryModel.find().sort({ sortOrder: 1 });
+    const items = await MenuItemModel.find({ available: true }).sort({ sortOrder: 1 });
+    let menu = [];
+    if (categories.length > 0) {
+      menu = categories.map(cat => {
+        const catItems = items.filter(item => item.petpoojaCategoryId === cat.petpoojaCategoryId);
+        return {
+          categoryName: cat.name,
+          items: catItems.map(item => ({
+            name: item.name,
+            price: item.price,
+            petpoojaItemId: item.petpoojaItemId,
+            image: item.image,
+            description: item.description,
+            available: item.available,
+            kcal: item.kcal,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+            sugar: item.sugar,
+            isMostLoved: item.isMostLoved,
+            isSeasonal: item.isSeasonal,
+            isSmoothie: item.isSmoothie
+          }))
+        };
+      }).filter(cat => cat.items.length > 0);
+    }
+
+    // Return everything in one payload
+    res.status(200).json({
+      storeStatus: settings,
+      tip: tip,
+      menu: menu
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- ANALYTICS ROUTES (NOW TRACKING VISITORS) ---
 
 app.get('/api/stats', async (req, res) => {

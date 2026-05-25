@@ -18,21 +18,15 @@ const dns = require('node:dns');
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const app = express();
+app.set('trust proxy', 1); // CRITICAL: Required for Render to pass the correct client IP to req.ip
+
 const http = require('http');
 const server = http.createServer(app);
-const rateLimit = require('express-rate-limit');
+const { limiter, requestLogger } = require('./utils/wafMiddleware');
 
-// 0. BOT PROTECTION: Rate limiting to prevent brute force and scraping
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  standardHeaders: true, 
-  legacyHeaders: false,
-  message: { error: 'Too many requests from this IP, please try again after 15 minutes.' }
-});
-
-// Apply rate limiter to all API routes
-app.use('/api/', limiter);
+// 0. BOT PROTECTION & LOGGING
+app.use(requestLogger); // Log all requests for IP/Region tracking
+app.use('/api/', limiter); // Apply stricter WAF rate limit to API routes
 
 const { Server } = require('socket.io');
 const io = new Server(server, {
@@ -756,6 +750,10 @@ app.post('/api/admin/login', (req, res) => {
     res.status(401).json({ success: false, message: 'Invalid credentials' });
   }
 });
+
+// --- ADMIN TRAFFIC LOGS ---
+const adminLogsRoutes = require('./routes/adminLogs');
+app.use('/api/admin/logs', adminLogsRoutes);
 
 // --- CORPORATE ORDERS ---
 app.post('/api/corporate-orders', async (req, res) => {

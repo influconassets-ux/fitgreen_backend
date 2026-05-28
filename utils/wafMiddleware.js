@@ -2,18 +2,19 @@ const geoip = require('geoip-lite');
 const rateLimit = require('express-rate-limit');
 const RequestLog = require('../models/RequestLog');
 
-// Configuration for rate limiting
+// FIX 2: Tighter rate limit — 30 req/min per IP (was 100)
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute window
-  max: 100, // Limit each IP to 100 requests per `window`
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  max: 30, // Reduced from 100 — a real user never needs 30 API calls/min
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Skip rate limiting for the /ping keep-alive route
+  skip: (req) => req.path === '/ping',
   handler: async (req, res, next, options) => {
-    // When rate limit is exceeded
     const ip = req.ip || req.socket.remoteAddress;
     const geo = geoip.lookup(ip) || {};
-    
-    // Log blocked request
+
+    // Always log blocked requests — these are the important ones
     try {
       await RequestLog.create({
         ip: ip,
@@ -37,12 +38,17 @@ const limiter = rateLimit({
   }
 });
 
-// Middleware to log all legitimate requests (optional, but requested for tracking IP/Region)
+// FIX 3: Only log errors (4xx/5xx) and blocked requests — not every single request.
+// This eliminates thousands of pointless MongoDB writes per hour from normal traffic.
 const requestLogger = async (req, res, next) => {
-  // Execute after the response finishes to get the status code
   res.on('finish', async () => {
-    // Avoid logging OPTIONS requests or static files if not needed
+    // Skip OPTIONS preflight, socket.io handshakes, and ping keep-alive
     if (req.method === 'OPTIONS') return;
+    if (req.path.startsWith('/socket.io')) return;
+    if (req.path === '/ping') return;
+
+    // FIX 3: Only log errors (400+) — successful requests don't need individual DB writes
+    if (res.statusCode < 400) return;
 
     const ip = req.ip || req.socket.remoteAddress;
     const geo = geoip.lookup(ip) || {};

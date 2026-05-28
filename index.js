@@ -108,6 +108,8 @@ const Category = require('./models/Category');
 const MenuItem = require('./models/MenuItem');
 
 app.get('/api/menu', async (req, res) => {
+  // FIX 1: Cache menu at CDN/proxy level for 5 minutes — 100 visitors = 1 DB hit, not 100
+  res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=60');
   try {
     const categories = await Category.find().sort({ sortOrder: 1 });
     const items = await MenuItem.find({ available: true }).sort({ sortOrder: 1 });
@@ -594,32 +596,30 @@ app.post('/api/track-visit', async (req, res) => {
 });
 
 // --- OPTIMIZED STARTUP INITIALIZATION ---
-// This endpoint combines store-status, tip, menu, and track-visit into one request to save 75% of bandwidth and DB hits.
+// This endpoint combines store-status, tip, menu, and track-visit into one request.
+// FIX 1: Cached at CDN for 5 minutes. Visit tracking is done client-side via /api/track-visit
+// so bots and repeat CDN-cached hits don't inflate visitor counts.
 app.get('/api/init', async (req, res) => {
+  // FIX 1: Cache this response at CDN level for 5 minutes.
+  // This means 100 visitors in 5 min = 1 backend hit instead of 100.
+  res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=60');
   try {
-    // 1. Log the visit
-    const newVisit = new Visit();
-    await newVisit.save().catch(err => console.error("Error logging visit in /init:", err));
-
-    // 2. Fetch Store Status
+    // Fetch Store Status, Tip, and Menu in parallel — 3x faster
     const SettingsModel = require('./models/Settings');
-    let settings = await SettingsModel.findOne();
-    if (!settings) {
-      settings = { isStoreOpen: true, openingTime: "6:00 AM" };
-    }
-
-    // 3. Fetch Tip
     const TipModel = require('./models/Tip');
-    let tip = await TipModel.findOne().sort({ updatedAt: -1 });
-    if (!tip) {
-      tip = { text: 'Start your meal with protein to stay fuller for longer and maintain steady energy throughout the day.' };
-    }
-
-    // 4. Fetch Menu
     const CategoryModel = require('./models/Category');
     const MenuItemModel = require('./models/MenuItem');
-    const categories = await CategoryModel.find().sort({ sortOrder: 1 });
-    const items = await MenuItemModel.find({ available: true }).sort({ sortOrder: 1 });
+
+    const [settingsResult, tipResult, categories, items] = await Promise.all([
+      SettingsModel.findOne(),
+      TipModel.findOne().sort({ updatedAt: -1 }),
+      CategoryModel.find().sort({ sortOrder: 1 }),
+      MenuItemModel.find({ available: true }).sort({ sortOrder: 1 })
+    ]);
+
+    const settings = settingsResult || { isStoreOpen: true, openingTime: "6:00 AM" };
+    const tip = tipResult || { text: 'Start your meal with protein to stay fuller for longer and maintain steady energy throughout the day.' };
+
     let menu = [];
     if (categories.length > 0) {
       menu = categories.map(cat => {
@@ -646,7 +646,6 @@ app.get('/api/init', async (req, res) => {
       }).filter(cat => cat.items.length > 0);
     }
 
-    // Return everything in one payload
     res.status(200).json({
       storeStatus: settings,
       tip: tip,

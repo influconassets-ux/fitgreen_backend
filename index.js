@@ -103,6 +103,9 @@ const CorporateClient = require('./models/CorporateClient');
 const petpoojaRoutes = require('./routes/petpooja');
 app.use('/api/petpooja', petpoojaRoutes);
 
+// --- TELEGRAM INTEGRATION ---
+const { sendTelegramOrderNotification } = require('./utils/telegramNotification');
+
 // Shortcut for grouped menu as requested
 const Category = require('./models/Category');
 const MenuItem = require('./models/MenuItem');
@@ -545,6 +548,14 @@ app.post('/api/razorpay/webhook', async (req, res) => {
           io.emit('newOrder', plainOrder); // Fallback: Emit to everyone for reliability
 
           console.log(`🔥 Emitted newOrder event for ${order.id} to admin-room`);
+
+          // --- TELEGRAM NOTIFICATION ---
+          try {
+            await sendTelegramOrderNotification(order);
+          } catch (teleErr) {
+            console.error(`Failed to send Telegram notification for order ${order.id}:`, teleErr.message);
+          }
+          // ------------------------------
 
           if (order.customerUid) {
             io.to(order.customerUid).emit('statusUpdate', {

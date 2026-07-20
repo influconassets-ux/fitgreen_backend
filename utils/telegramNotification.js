@@ -36,6 +36,9 @@ async function sendTelegramOrderNotification(order) {
       });
     }
 
+    // foreach chat id in user model and send notification
+    
+    
     const payload = {
       chat_id: chatId,
       text: message,

@@ -709,6 +709,32 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// --- REPORTS ROUTE ---
+app.get('/api/reports/monthly-sales', async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    if (!month || !year) {
+      return res.status(400).json({ error: 'Month and year are required' });
+    }
+    
+    // Parse month (1-12) to (0-11) for Date constructor
+    const m = parseInt(month, 10) - 1;
+    const y = parseInt(year, 10);
+    
+    const startOfMonth = new Date(y, m, 1);
+    const endOfMonth = new Date(y, m + 1, 0, 23, 59, 59, 999);
+
+    const orders = await Order.find({
+      date: { $gte: startOfMonth, $lte: endOfMonth },
+      status: { $ne: 'pending' }
+    }).sort({ date: 1 });
+
+    res.status(200).json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 5. Fetch All Orders for Order Management Page (NOW FROM MONGODB)
 app.get('/api/orders', async (req, res) => {
   try {

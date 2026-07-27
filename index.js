@@ -62,8 +62,8 @@ io.on('connection', (socket) => {
 });
 
 // 2. IMAGE FIX: Increase JSON limit to 10MB to allow profile photos
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Firebase Admin initialization (Requires service account details)
 if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PRIVATE_KEY !== 'YOUR_PRIVATE_KEY_HERE') {
@@ -98,6 +98,7 @@ const Coupon = require('./models/Coupon');
 const Tip = require('./models/Tip');
 const CorporateOrder = require('./models/CorporateOrder');
 const CorporateClient = require('./models/CorporateClient');
+const Event = require('./models/Event');
 
 // --- PETPOOJA INTEGRATION ---
 const petpoojaRoutes = require('./routes/petpooja');
@@ -667,6 +668,66 @@ app.get('/api/init', async (req, res) => {
   }
 });
 
+// --- REVIEW ROUTES ---
+const Review = require('./models/Review');
+
+app.get('/api/reviews', async (req, res) => {
+  try {
+    const reviews = await Review.find().sort({ createdAt: -1 });
+    res.status(200).json(reviews);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/reviews', async (req, res) => {
+  const { videoUrl, posterUrl } = req.body;
+  try {
+    let finalVideoUrl = videoUrl;
+    let finalPosterUrl = posterUrl || '';
+    let cloudinaryId = '';
+
+    if (videoUrl && videoUrl.startsWith('data:video')) {
+      console.log('Uploading review video to Cloudinary...');
+      const uploadRes = await cloudinary.uploader.upload(videoUrl, { 
+        folder: 'fitgreen_reviews',
+        resource_type: 'video'
+      });
+      finalVideoUrl = uploadRes.secure_url;
+      cloudinaryId = uploadRes.public_id;
+      // Cloudinary automatically can serve a jpg from a video
+      finalPosterUrl = finalVideoUrl.replace(/\.(mp4|webm|mov)$/i, '.jpg');
+      console.log('Upload complete:', finalVideoUrl);
+    }
+
+    const review = await Review.create({
+      videoUrl: finalVideoUrl,
+      posterUrl: finalPosterUrl,
+      cloudinaryId
+    });
+
+    res.status(201).json({ success: true, review });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/reviews/:id', async (req, res) => {
+  try {
+    const review = await Review.findById(req.params.id);
+    if (!review) return res.status(404).json({ error: 'Review not found' });
+
+    if (review.cloudinaryId) {
+      await cloudinary.uploader.destroy(review.cloudinaryId, { resource_type: 'video' });
+    }
+
+    await Review.findByIdAndDelete(req.params.id);
+    res.status(200).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- ANALYTICS ROUTES (NOW TRACKING VISITORS) ---
 
 app.get('/api/stats', async (req, res) => {
@@ -926,6 +987,69 @@ app.post('/api/corporate-login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
     res.status(200).json({ success: true, client });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- EVENTS API ---
+app.get('/api/events', async (req, res) => {
+  try {
+    const { type } = req.query;
+    let query = {};
+    if (type) query.type = type;
+    const events = await Event.find(query).sort({ createdAt: -1 });
+    res.status(200).json(events);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/events', async (req, res) => {
+  try {
+    const { type, title, date, time, venue, description, tags, coverPhotoBase64, thumbnailBase64, galleryBase64Array } = req.body;
+    
+    let newEventData = { type, title, date, venue, description };
+
+    if (type === 'upcoming') {
+      newEventData.time = time;
+      newEventData.tags = tags || [];
+      if (coverPhotoBase64) {
+        const uploadResponse = await cloudinary.uploader.upload(coverPhotoBase64, { folder: "fitgreen/events" });
+        newEventData.coverPhotoUrl = uploadResponse.secure_url;
+      }
+    } else if (type === 'recent') {
+      if (thumbnailBase64) {
+        const uploadResponse = await cloudinary.uploader.upload(thumbnailBase64, { folder: "fitgreen/events" });
+        newEventData.thumbnailUrl = uploadResponse.secure_url;
+      }
+      if (galleryBase64Array && galleryBase64Array.length > 0) {
+        const galleryUrls = [];
+        for (const b64 of galleryBase64Array) {
+          const uploadRes = await cloudinary.uploader.upload(b64, { folder: "fitgreen/events" });
+          galleryUrls.push(uploadRes.secure_url);
+        }
+        newEventData.galleryUrls = galleryUrls;
+      }
+    }
+
+    const newEvent = new Event(newEventData);
+    await newEvent.save();
+    res.status(201).json(newEvent);
+  } catch (err) {
+    console.error("Event creation error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/events/:id', async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    
+    // We should ideally delete from Cloudinary here as well, but keeping it simple for now
+    await Event.findByIdAndDelete(req.params.id);
+    res.status(200).json({ success: true, message: 'Event deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

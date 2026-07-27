@@ -173,8 +173,18 @@ router.post('/items', async (req, res) => {
       itemData.itemId = itemData.petpoojaItemId;
     }
 
-    const item = new MenuItem(itemData);
-    await item.save();
+    // Clean up frontend-only fields that aren't in the schema
+    delete itemData.id;
+    delete itemData.img;
+    delete itemData.desc;
+    delete itemData.outOfStock;
+
+    // Use upsert to prevent duplicate key errors on petpoojaItemId
+    const item = await MenuItem.findOneAndUpdate(
+      { petpoojaItemId: itemData.petpoojaItemId },
+      { $set: { ...itemData, available: itemData.available !== false } },
+      { upsert: true, new: true }
+    );
     
     // Notify frontend
     const io = req.app.get('socketio');

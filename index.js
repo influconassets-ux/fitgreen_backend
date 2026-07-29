@@ -617,7 +617,18 @@ app.post('/api/orders/verify-payment', async (req, res) => {
     console.log(`✅ Order ${updatedOrder.id} marked as paid via FRONTEND FALLBACK`);
     
     // Trigger relays and sockets
-    try { await relayOrderToPetpooja(updatedOrder); } catch (e) { console.error(e); }
+    try { 
+      await relayOrderToPetpooja(updatedOrder); 
+    } catch (e) { 
+      console.error(e); 
+    }
+
+    // --- TELEGRAM NOTIFICATION ---
+    try {
+      await sendTelegramOrderNotification(updatedOrder);
+    } catch (teleErr) {
+      console.error(`Failed to send Telegram notification for order ${updatedOrder.id}:`, teleErr.message);
+    }
     
     if (updatedOrder.customerUid) {
       await User.findOneAndUpdate(

@@ -315,10 +315,10 @@ app.post('/api/settings/store-status', async (req, res) => {
       { isStoreOpen, openingTime },
       { upsert: true, new: true }
     );
-    
+
     // Notify all connected clients via Socket.io
     io.emit('store-status-changed', settings);
-    
+
     res.status(200).json({ success: true, settings });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -349,7 +349,7 @@ app.post('/api/products', async (req, res) => {
   try {
     if (productData.img && productData.img.startsWith('data:image')) {
       console.log('Uploading product image to Cloudinary...');
-      const uploadRes = await cloudinary.uploader.upload(productData.img, { 
+      const uploadRes = await cloudinary.uploader.upload(productData.img, {
         folder: 'fitgreen_products',
         format: 'webp',
         quality: 'auto',
@@ -408,7 +408,7 @@ app.post('/verify-token', async (req, res) => {
     if (profileData?.photo) {
       if (profileData.photo.startsWith('data:image')) {
         try {
-          const uploadRes = await cloudinary.uploader.upload(profileData.photo, { 
+          const uploadRes = await cloudinary.uploader.upload(profileData.photo, {
             folder: 'fitgreen_profiles',
             format: 'webp',
             quality: 'auto',
@@ -596,6 +596,46 @@ app.post('/api/razorpay/webhook', async (req, res) => {
   }
 });
 
+// 3. Frontend Fallback Verification (For localhost testing & webhook failures)
+app.post('/api/orders/verify-payment', async (req, res) => {
+  const { razorpay_order_id, razorpay_payment_id } = req.body;
+  
+  try {
+    const order = await Order.findOne({ razorpayOrderId: razorpay_order_id });
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+    
+    // If it's already paid via webhook, just return success
+    if (order.status === 'paid') return res.status(200).json({ success: true });
+
+    // Update status to paid
+    const updatedOrder = await Order.findOneAndUpdate(
+      { razorpayOrderId: razorpay_order_id },
+      { $set: { status: 'paid', razorpayPaymentId: razorpay_payment_id } },
+      { new: true }
+    );
+
+    console.log(`✅ Order ${updatedOrder.id} marked as paid via FRONTEND FALLBACK`);
+    
+    // Trigger relays and sockets
+    try { await relayOrderToPetpooja(updatedOrder); } catch (e) { console.error(e); }
+    
+    if (updatedOrder.customerUid) {
+      await User.findOneAndUpdate(
+        { uid: updatedOrder.customerUid, "orders.id": updatedOrder.id },
+        { $set: { "orders.$.status": 'paid' } }
+      );
+    }
+    
+    io.to('admin-room').emit('newOrder', updatedOrder.toObject());
+    io.emit('newOrder', updatedOrder.toObject());
+    
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Frontend payment verification failed:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // --- VISITOR TRACKING ENDPOINT ---
 app.post('/api/track-visit', async (req, res) => {
   try {
@@ -689,7 +729,7 @@ app.post('/api/reviews', async (req, res) => {
 
     if (videoUrl && videoUrl.startsWith('data:video')) {
       console.log('Uploading review video to Cloudinary...');
-      const uploadRes = await cloudinary.uploader.upload(videoUrl, { 
+      const uploadRes = await cloudinary.uploader.upload(videoUrl, {
         folder: 'fitgreen_reviews',
         resource_type: 'video'
       });
@@ -777,11 +817,11 @@ app.get('/api/reports/monthly-sales', async (req, res) => {
     if (!month || !year) {
       return res.status(400).json({ error: 'Month and year are required' });
     }
-    
+
     // Parse month (1-12) to (0-11) for Date constructor
     const m = parseInt(month, 10) - 1;
     const y = parseInt(year, 10);
-    
+
     const startOfMonth = new Date(y, m, 1);
     const endOfMonth = new Date(y, m + 1, 0, 23, 59, 59, 999);
 
@@ -1008,7 +1048,7 @@ app.get('/api/events', async (req, res) => {
 app.post('/api/events', async (req, res) => {
   try {
     const { type, title, date, time, venue, description, tags, coverPhotoBase64, thumbnailBase64, galleryBase64Array } = req.body;
-    
+
     let newEventData = { type, title, date, venue, description };
 
     if (type === 'upcoming') {
@@ -1046,7 +1086,7 @@ app.delete('/api/events/:id', async (req, res) => {
   try {
     const event = await Event.findById(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    
+
     // We should ideally delete from Cloudinary here as well, but keeping it simple for now
     await Event.findByIdAndDelete(req.params.id);
     res.status(200).json({ success: true, message: 'Event deleted' });

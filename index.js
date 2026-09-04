@@ -863,7 +863,7 @@ app.get('/api/reports/monthly-sales', async (req, res) => {
 // 5. Fetch All Orders for Order Management Page (NOW FROM MONGODB)
 app.get('/api/orders', async (req, res) => {
   try {
-    const orders = await Order.find({ status: { $ne: 'pending' } })
+    const orders = await Order.find({})
       .sort({ date: -1 });
     res.status(200).json(orders);
   } catch (err) {

@@ -105,7 +105,7 @@ const petpoojaRoutes = require('./routes/petpooja');
 app.use('/api/petpooja', petpoojaRoutes);
 
 // --- TELEGRAM INTEGRATION ---
-const { sendTelegramOrderNotification } = require('./utils/telegramNotification');
+const { sendTelegramOrderNotification, sendTelegramDelayedCheck } = require('./utils/telegramNotification');
 
 // Shortcut for grouped menu as requested
 const Category = require('./models/Category');
@@ -468,6 +468,19 @@ app.post('/place-order', async (req, res) => {
 
     res.status(200).json({ success: true, order: newOrder });
     console.log(`📝 Order created in pending state: ${newOrder.id}`);
+
+    // --- DELAYED STATUS CHECK (40s) ---
+    setTimeout(async () => {
+      try {
+        const orderToCheck = await Order.findOne({ id: newOrder.id });
+        if (orderToCheck) {
+          await sendTelegramDelayedCheck(orderToCheck);
+        }
+      } catch (e) {
+        console.error('Error in delayed telegram check:', e.message);
+      }
+    }, 40000);
+
   } catch (error) {
     console.error('Failed to save order:', error);
     res.status(500).json({ success: false, error: 'Failed to save order history' });

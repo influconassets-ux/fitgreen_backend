@@ -292,15 +292,23 @@ app.post('/api/tip', async (req, res) => {
 
 // --- SETTINGS / STORE STATUS ROUTES ---
 const Settings = require('./models/Settings');
+const { getComputedStoreStatus } = require('./utils/storeStatus');
 
 // 1. Get Store Status
 app.get('/api/settings/store-status', async (req, res) => {
   try {
     let settings = await Settings.findOne();
     if (!settings) {
-      settings = await Settings.create({ isStoreOpen: true, openingTime: "6:00 AM" });
+      settings = await Settings.create({ isStoreOpen: true, openingTime: "12:00 PM" });
     }
-    res.status(200).json(settings);
+    const computedStatus = getComputedStoreStatus(settings);
+    res.status(200).json({
+      ...settings.toObject(),
+      isStoreOpen: computedStatus.isStoreOpen,
+      nextStateChangeTime: computedStatus.nextStateChangeTime,
+      nextStateChangeReason: computedStatus.nextStateChangeReason,
+      isManuallyClosed: computedStatus.isManuallyClosed
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -309,15 +317,31 @@ app.get('/api/settings/store-status', async (req, res) => {
 // 2. Update Store Status (Admin)
 app.post('/api/settings/store-status', async (req, res) => {
   try {
-    const { isStoreOpen, openingTime } = req.body;
+    const { isStoreOpen, openingTime, manualCloseUntil } = req.body;
+    
+    // If admin explicitly tries to 'open' via toggle, we clear manualCloseUntil
+    // If they provide a specific manualCloseUntil, we update it.
+    let updateFields = { isStoreOpen, openingTime };
+    if (manualCloseUntil !== undefined) {
+      updateFields.manualCloseUntil = manualCloseUntil;
+    }
+
     const settings = await Settings.findOneAndUpdate(
       {},
-      { isStoreOpen, openingTime },
+      updateFields,
       { upsert: true, new: true }
     );
 
+    const computedStatus = getComputedStoreStatus(settings);
+
     // Notify all connected clients via Socket.io
-    io.emit('store-status-changed', settings);
+    io.emit('store-status-changed', {
+      ...settings.toObject(),
+      isStoreOpen: computedStatus.isStoreOpen,
+      nextStateChangeTime: computedStatus.nextStateChangeTime,
+      nextStateChangeReason: computedStatus.nextStateChangeReason,
+      isManuallyClosed: computedStatus.isManuallyClosed
+    });
 
     res.status(200).json({ success: true, settings });
   } catch (err) {
@@ -441,6 +465,13 @@ app.post('/verify-token', async (req, res) => {
 app.post('/place-order', async (req, res) => {
   const { idToken, orderData } = req.body;
   try {
+    // 0. STRICT STORE STATUS CHECK
+    const settings = await Settings.findOne() || {};
+    const computedStatus = getComputedStoreStatus(settings);
+    if (!computedStatus.isStoreOpen) {
+      return res.status(400).json({ success: false, error: 'Sorry, the store is currently closed. We are not accepting new orders.' });
+    }
+
     const decodedToken = await admin.auth().verifyIdToken(idToken);
     const { uid } = decodedToken;
 
@@ -494,6 +525,13 @@ app.post('/api/razorpay/create-order', async (req, res) => {
   const { amount, currency = 'INR', receipt } = req.body;
   console.log(`💳 Razorpay Order Request Received: Amount=${amount}, Receipt=${receipt}`);
   try {
+    // 0. STRICT STORE STATUS CHECK
+    const settings = await Settings.findOne() || {};
+    const computedStatus = getComputedStoreStatus(settings);
+    if (!computedStatus.isStoreOpen) {
+      return res.status(400).json({ success: false, error: 'Sorry, the store is currently closed. We are not accepting new orders.' });
+    }
+
     const options = {
       amount: Math.round(amount * 100), // convert to paise and ensure it's an integer
       currency,
@@ -693,7 +731,7 @@ app.get('/api/init', async (req, res) => {
       MenuItemModel.find({ available: true }).sort({ sortOrder: 1 })
     ]);
 
-    const settings = settingsResult || { isStoreOpen: true, openingTime: "6:00 AM" };
+    const settings = settingsResult || { isStoreOpen: true, openingTime: "12:00 PM" };
     const tip = tipResult || { text: 'Start your meal with protein to stay fuller for longer and maintain steady energy throughout the day.' };
 
     let menu = [];
@@ -722,8 +760,16 @@ app.get('/api/init', async (req, res) => {
       }).filter(cat => cat.items.length > 0);
     }
 
+    const computedStatus = getComputedStoreStatus(settings);
+
     res.status(200).json({
-      storeStatus: settings,
+      storeStatus: {
+        ...(settings.toObject ? settings.toObject() : settings),
+        isStoreOpen: computedStatus.isStoreOpen,
+        nextStateChangeTime: computedStatus.nextStateChangeTime,
+        nextStateChangeReason: computedStatus.nextStateChangeReason,
+        isManuallyClosed: computedStatus.isManuallyClosed
+      },
       tip: tip,
       menu: menu
     });

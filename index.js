@@ -5,6 +5,7 @@ const admin = require('firebase-admin');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const cloudinary = require('cloudinary').v2;
+const moment = require('moment-timezone');
 const { relayOrderToPetpooja } = require('./utils/petpoojaRelay');
 
 cloudinary.config({
@@ -318,12 +319,24 @@ app.get('/api/settings/store-status', async (req, res) => {
 app.post('/api/settings/store-status', async (req, res) => {
   try {
     const { isStoreOpen, openingTime, manualCloseUntil } = req.body;
-    
-    // If admin explicitly tries to 'open' via toggle, we clear manualCloseUntil
-    // If they provide a specific manualCloseUntil, we update it.
+    const nowIST = moment().tz('Asia/Kolkata');
+
     let updateFields = { isStoreOpen, openingTime };
     if (manualCloseUntil !== undefined) {
       updateFields.manualCloseUntil = manualCloseUntil;
+    }
+
+    if (isStoreOpen) {
+      // Admin is forcing the store OPEN: clear any close override and activate
+      // the open override for today, so it actually takes effect even before
+      // the normal schedule's opening hour (previously this flag was never read).
+      updateFields.manualCloseUntil = null;
+      updateFields.manualOpenOverride = true;
+      updateFields.manualOpenOverrideDate = nowIST.format('YYYY-MM-DD');
+    } else {
+      // Admin is forcing the store CLOSED: the open override must not re-open it.
+      updateFields.manualOpenOverride = false;
+      updateFields.manualOpenOverrideDate = null;
     }
 
     const settings = await Settings.findOneAndUpdate(
@@ -343,7 +356,16 @@ app.post('/api/settings/store-status', async (req, res) => {
       isManuallyClosed: computedStatus.isManuallyClosed
     });
 
-    res.status(200).json({ success: true, settings });
+    res.status(200).json({
+      success: true,
+      settings: {
+        ...settings.toObject(),
+        isStoreOpen: computedStatus.isStoreOpen,
+        nextStateChangeTime: computedStatus.nextStateChangeTime,
+        nextStateChangeReason: computedStatus.nextStateChangeReason,
+        isManuallyClosed: computedStatus.isManuallyClosed
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -318,7 +318,7 @@ app.get('/api/settings/store-status', async (req, res) => {
 // 2. Update Store Status (Admin)
 app.post('/api/settings/store-status', async (req, res) => {
   try {
-    const { isStoreOpen, openingTime, manualCloseUntil } = req.body;
+    const { isStoreOpen, openingTime, manualCloseUntil, closureReason } = req.body;
     const nowIST = moment().tz('Asia/Kolkata');
 
     let updateFields = { isStoreOpen, openingTime };
@@ -327,16 +327,18 @@ app.post('/api/settings/store-status', async (req, res) => {
     }
 
     if (isStoreOpen) {
-      // Admin is forcing the store OPEN: clear any close override and activate
+      // Admin is forcing the store OPEN: clear any close override/reason and activate
       // the open override for today, so it actually takes effect even before
       // the normal schedule's opening hour (previously this flag was never read).
       updateFields.manualCloseUntil = null;
       updateFields.manualOpenOverride = true;
       updateFields.manualOpenOverrideDate = nowIST.format('YYYY-MM-DD');
+      updateFields.closureReason = null;
     } else {
       // Admin is forcing the store CLOSED: the open override must not re-open it.
       updateFields.manualOpenOverride = false;
       updateFields.manualOpenOverrideDate = null;
+      updateFields.closureReason = closureReason || null;
     }
 
     const settings = await Settings.findOneAndUpdate(

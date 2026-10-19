@@ -32,6 +32,21 @@ function getNextNormalOpenTime(now) {
 }
 
 /**
+ * Given a manual-close-until timestamp, returns when the store will actually
+ * reopen: that exact moment if it falls inside a normal schedule window that
+ * day, otherwise the next normal opening time after it. This makes multi-day
+ * closures (e.g. a Puja holiday from the 19th to the 22nd) report the real
+ * reopen date instead of whatever the schedule happens to say "right now".
+ */
+function getEffectiveReopenTime(manualCloseUntil) {
+  const window = getScheduleWindow(manualCloseUntil);
+  if (window && manualCloseUntil.hour() >= window.openHour && manualCloseUntil.hour() < window.closeHour) {
+    return { time: moment(manualCloseUntil), isExact: true };
+  }
+  return { time: getNextNormalOpenTime(manualCloseUntil), isExact: false };
+}
+
+/**
  * Calculates the current store status and next state change time.
  * @param {Object} settings - The settings document from the database
  * @returns {Object} { isStoreOpen, nextStateChangeTime, nextStateChangeReason, isManuallyClosed }
@@ -70,20 +85,19 @@ function getComputedStoreStatus(settings) {
     const closeTime = normalCloseTime || getNextNormalOpenTime(now); // fallback, shouldn't hit on a day with a window
     nextStateChangeTime = closeTime.format('hh:mm A');
     nextStateChangeReason = 'auto-close';
-  } else if (isManuallyClosed && (isNormalScheduleOpen || isManualOpenActive)) {
-    // Closed manually during what would otherwise be open hours.
-    if (normalCloseTime && manualCloseUntil.isBefore(normalCloseTime)) {
-      nextStateChangeTime = manualCloseUntil.isSame(now, 'day')
-        ? manualCloseUntil.format('hh:mm A')
-        : manualCloseUntil.format('hh:mm A [Tomorrow]');
-      nextStateChangeReason = 'manual-timer-expires';
+  } else if (isManuallyClosed) {
+    // Manually closed (short pause or a multi-day holiday closure). The store
+    // reopens at the manualCloseUntil time itself if that falls inside a normal
+    // open window that day, otherwise at the next normal opening time after it.
+    const { time: reopenTime, isExact } = getEffectiveReopenTime(manualCloseUntil);
+    if (reopenTime.isSame(now, 'day')) {
+      nextStateChangeTime = reopenTime.format('hh:mm A');
+    } else if (reopenTime.isSame(moment(now).add(1, 'days'), 'day')) {
+      nextStateChangeTime = reopenTime.format('hh:mm A [Tomorrow]');
     } else {
-      const nextOpen = getNextNormalOpenTime(now);
-      nextStateChangeTime = nextOpen.isSame(now, 'day')
-        ? nextOpen.format('hh:mm A')
-        : nextOpen.format('hh:mm A [Tomorrow]');
-      nextStateChangeReason = 'normal-open';
+      nextStateChangeTime = reopenTime.format('hh:mm A [on] MMM D');
     }
+    nextStateChangeReason = isExact ? 'manual-timer-expires' : 'normal-open';
   } else {
     // Closed by normal schedule (no manual override active)
     const nextOpen = getNextNormalOpenTime(now);
